@@ -63,6 +63,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         print(f"ep_fw_rew: {episode_forward_reward}")
         print(f"ep_ctrl_rew: {episode_ctrl_reward}")
         print(f"ep_len: {episode_len}")
+        print(f"step_num: {step_num}")
         print(f"ent_coef: {agent.alpha}")
         print(f"learning_rate: {agent.lr}")
         print("--------------------------------")
