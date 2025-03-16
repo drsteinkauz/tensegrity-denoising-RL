@@ -72,17 +72,45 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity):
+    def __init__(self, capacity, state_dim):
         self.buffer = deque(maxlen=capacity)
+
+        self.running_mean_state = np.zeros(state_dim)
+        self.running_var_state = np.ones(state_dim)
+        self.running_mean_reward = 0
+        self.running_var_reward = 1
+        self.normalize_eps = 1e-6
     
     def push(self, state, action, reward, next_state, done):
+        if self.size() == 0:
+            self.update_state_stats(state)
         self.buffer.append((state, action, reward, next_state, done))
+        self.update_reward_stats(reward)
+        self.update_state_stats(next_state)
     
     def sample(self, batch_size):
-        return random.sample(self.buffer, batch_size)
+        sampled_batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = zip(*sampled_batch)
+        
+        state_normalized = (state - self.running_mean_state) / np.sqrt(self.running_var_state + self.normalize_eps)
+        reward_normalized = (reward - self.running_mean_reward) / np.sqrt(self.running_var_reward + self.normalize_eps)
+        next_state_normalized = (next_state - self.running_mean_state) / np.sqrt(self.running_var_state + self.normalize_eps)
+
+        sampled_batch_normalized = list(zip(state_normalized, action, reward_normalized, next_state_normalized, done))
+        return sampled_batch_normalized
     
     def size(self):
         return len(self.buffer)
+    
+    def update_state_stats(self, state):
+        delta_state = state - self.running_mean_state
+        self.running_mean_state += delta_state / (self.size()+1)
+        self.running_var_state += delta_state * (state - self.running_mean_state)
+
+    def update_reward_stats(self, reward):
+        delta_reward = reward - self.running_mean_reward
+        self.running_mean_reward += delta_reward / self.size()
+        self.running_var_reward += delta_reward * (reward - self.running_mean_reward) 
 
 
 # SAC Agent class
@@ -117,7 +145,7 @@ class SACAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(self.buffer_size)
+        self.replay_buffer = ReplayBuffer(self.buffer_size, state_dim)
     
     def select_action(self, state):
         state = torch.FloatTensor(state).cuda().unsqueeze(0)
@@ -149,7 +177,7 @@ class SACAgent:
         q1_value, q2_value = self.critic(state_batch, action_batch)
         critic1_loss = F.mse_loss(q1_value, next_q_value)
         critic2_loss = F.mse_loss(q2_value, next_q_value)
-        critic_loss = critic1_loss + critic2_loss
+        critic_loss = (critic1_loss + critic2_loss) / 2
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -183,5 +211,9 @@ class SACAgent:
             'ent_coef': self.alpha,
             'log_pi': action_log_prob.mean().item(),
             'pi_std': std.mean().item(),
+            'running_state_mean': self.replay_buffer.running_mean_state,
+            'running_state_var': self.replay_buffer.running_var_state,
+            'running_reward_mean': self.replay_buffer.running_mean_reward,
+            'running_reward_var': self.replay_buffer.running_var_reward,
         }
         return info

@@ -49,14 +49,14 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
                 writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
                 writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
                 writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
-                writer.add_scalar("ent/ent_coef", info_agent["ent_coef"], step_num)
-                writer.add_scalar("ent/log_pi", info_agent["log_pi"], step_num)
-                writer.add_scalar("ent/pi_std", info_agent["pi_std"], step_num)
+                writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
+                writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
+                writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done or episode_len >= 100:
+            if done or episode_len >= 1000:
                 break
         
         eps_num += 1
@@ -71,7 +71,6 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         print(f"ep_ctrl_rew: {episode_ctrl_reward}")
         print(f"ep_len: {episode_len}")
         print(f"step_num: {step_num}")
-        print(f"ent_coef: {agent.alpha}")
         print(f"learning_rate: {agent.lr}")
         print("--------------------------------")
     
