@@ -33,29 +33,36 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         while True:
             action = agent.select_action(state)
             action = action * 0.3 - 0.15
-            next_state, reward, done, _, info = env.step(action)
+            next_state, reward, done, _, info_env = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
-            agent.update()
+            info_agent = agent.update()
             
             state = next_state
             episode_reward += reward
-            episode_forward_reward += info["reward_forward"]
-            episode_ctrl_reward += info["reward_ctrl"]
+            episode_forward_reward += info_env["reward_forward"]
+            episode_ctrl_reward += info_env["reward_ctrl"]
 
             step_num += 1
             episode_len += 1
 
+            if info_agent is not None:
+                writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
+                writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
+                writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
+                writer.add_scalar("ent/ent_coef", info_agent["ent_coef"], step_num)
+                writer.add_scalar("ent/log_pi", info_agent["log_pi"], step_num)
+                writer.add_scalar("ent/pi_std", info_agent["pi_std"], step_num)
+
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done:
+            if done or episode_len >= 100:
                 break
         
         eps_num += 1
-        writer.add_scalar("ep_rew", episode_reward, eps_num)
-        writer.add_scalar("ep_len", episode_len, eps_num)
-        writer.add_scalar("ent_coef", agent.alpha, eps_num)
-        writer.add_scalar("learning_rate", agent.lr, eps_num)
+        writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
+        writer.add_scalar("ep/ep_len", episode_len, eps_num)
+        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
 
         print("--------------------------------")
         print(f"Episode {eps_num}")
