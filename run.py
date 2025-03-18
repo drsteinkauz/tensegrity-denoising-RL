@@ -31,7 +31,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         episode_ctrl_reward = 0
 
         while True:
-            action = agent.select_action(state)
+            if step_num < agent.warmup_steps:
+                action = np.random.uniform(-1, 1, size=(6,))
+            else:
+                action = agent.select_action(state)
             action = action * 0.3 - 0.15
             next_state, reward, done, _, info_env = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
@@ -56,7 +59,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done or episode_len >= 1000:
+            if done or episode_len >= 5000:
                 break
         
         eps_num += 1
