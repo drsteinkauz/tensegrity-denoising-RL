@@ -32,12 +32,12 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
 
         while True:
             if step_num < agent.warmup_steps:
-                action = np.random.uniform(-1, 1, size=(6,))
+                action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action = agent.select_action(state)
-            action = action * 0.3 - 0.15
-            next_state, reward, done, _, info_env = env.step(action)
-            agent.replay_buffer.push(state, action, reward, next_state, done)
+                action_scaled = agent.select_action(state)
+            action_unscaled = action_scaled * 0.3 - 0.15
+            next_state, reward, done, _, info_env = env.step(action_unscaled)
+            agent.replay_buffer.push(state, action_scaled, reward, next_state, done)
             info_agent = agent.update()
             
             state = next_state
