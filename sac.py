@@ -65,7 +65,7 @@ class PolicyNetwork(nn.Module):
         epsilon_tanh = 1e-6
         mean, std = self.forward(state)
         dist = torch.distributions.Normal(mean, std)
-        action_unbounded = dist.sample()
+        action_unbounded = dist.rsample()
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
         action_log_prob = dist.log_prob(action_unbounded)
         action_log_prob -= torch.log(1 - action_bounded.pow(2) + epsilon_tanh)
@@ -125,7 +125,8 @@ class SACAgent:
     
     def select_action(self, state):
         state = torch.FloatTensor(state).cuda().unsqueeze(0)
-        action, _, _ = self.actor.sample(state)
+        with torch.no_grad():
+            action, _, _ = self.actor.sample(state)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
