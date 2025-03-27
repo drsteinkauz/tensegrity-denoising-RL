@@ -72,6 +72,18 @@ class PolicyNetwork(nn.Module):
         action_log_prob = action_log_prob.sum(1, keepdim=True)
         mean_bounded = torch.tanh(mean)
         return action_bounded, action_log_prob, std
+    
+    def predict(self, state):
+        epsilon_tanh = 1e-6
+        mean, std = self.forward(state)
+        dist = torch.distributions.Normal(mean, std)
+        action_unbounded = dist.rsample()
+        action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
+        return action_bounded, std
+    
+    def to(self, device):
+        self.device = device
+        return super(PolicyNetwork, self).to(device)
 
 # Replay buffer class
 class ReplayBuffer:
@@ -104,13 +116,13 @@ class SACAgent:
         self.warmup_steps = 256
 
         # self.alpha = 1          # Entropy coefficient # 0.2
-        self.log_ent_coef = torch.zeros(1).cuda().requires_grad_(True)
+        self.log_ent_coef = torch.zeros(1).to(self.device).requires_grad_(True)
         self._target_entropy = -action_dim
         
         # Networks
-        self.actor = PolicyNetwork(state_dim, action_dim).cuda()
-        self.critic = QNetwork(state_dim, action_dim).cuda()
-        self.target_critic = QNetwork(state_dim, action_dim).cuda()
+        self.actor = PolicyNetwork(state_dim, action_dim).to(self.device)
+        self.critic = QNetwork(state_dim, action_dim).to(self.device)
+        self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -124,7 +136,7 @@ class SACAgent:
         self.replay_buffer = ReplayBuffer(self.buffer_size, state_dim)
     
     def select_action(self, state):
-        state = torch.FloatTensor(state).cuda().unsqueeze(0)
+        state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         with torch.no_grad():
             action, _, _ = self.actor.sample(state)
         return action.squeeze(0).cpu().numpy()
@@ -136,11 +148,11 @@ class SACAgent:
         batch = self.replay_buffer.sample(self.batch_size)
         state_batch, action_batch, reward_batch, next_state_batch, done_batch = zip(*batch)
         
-        state_batch = torch.FloatTensor(state_batch).cuda()
-        action_batch = torch.FloatTensor(action_batch).cuda()
-        reward_batch = torch.FloatTensor(reward_batch).cuda()
-        next_state_batch = torch.FloatTensor(next_state_batch).cuda()
-        done_batch = torch.FloatTensor(done_batch).cuda()
+        state_batch = torch.FloatTensor(state_batch).to(self.device)
+        action_batch = torch.FloatTensor(action_batch).to(self.device)
+        reward_batch = torch.FloatTensor(reward_batch).to(self.device)
+        next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
+        done_batch = torch.FloatTensor(done_batch).to(self.device)
 
         sampled_action, action_log_prob, std = self.actor.sample(state_batch)
         

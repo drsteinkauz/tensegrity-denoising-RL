@@ -80,8 +80,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     writer.close()
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
-    
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor.load_state_dict(torch.load(path_to_model, map_location=torch.device(device=device)))
     os.makedirs(saved_data_dir, exist_ok=True)
 
     obs = env.reset()[0]
@@ -94,7 +95,6 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     observed_tendon_length_list = []
     cap_posi_list = []
     observed_cap_posi_list = []
-    total_bar_contact_list = []
     reward_forward_list = []
     reward_ctrl_list = []
     waypt_list = []
@@ -102,12 +102,13 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     y_pos_list = []
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        action, _ = model.predict(obs)
-        obs, _, done, _, info = env.step(action)
+        action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+        action_unscaled = action_scaled.detach() * 0.3 - 0.15
+        obs, _, done, _, info = env.step(action_unscaled.numpy())
 
 
 
-        actions_list.append(action)
+        actions_list.append(action_unscaled)
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
@@ -119,14 +120,6 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
         waypt_list.append(info["waypt"])
         x_pos_list.append(info["x_position"])
         y_pos_list.append(info["y_position"])
-        total_bar_contact = 0
-        for j,contact in enumerate(env.data.contact):
-            if contact.geom1 != 0 and contact.geom2 != 0: # neither geom is 0, which is ground. so contact is between bars
-                forcetorque = np.zeros(6)
-                mujoco.mj_contactForce(env.model, env.data, j, forcetorque)
-                force_mag = np.sqrt(forcetorque[0]**2 + forcetorque[1]**2 + forcetorque[2]**2)
-                total_bar_contact += force_mag
-        total_bar_contact_list.append(total_bar_contact)
 
         if done:
             extra_steps -= 1
@@ -139,7 +132,6 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     observed_tendon_length_array = np.array(observed_tendon_length_list)
     cap_posi_array = np.array(cap_posi_list)
     observed_cap_posi_array = np.array(observed_cap_posi_list)
-    total_bar_contact_array = np.array(total_bar_contact_list)
     reward_forward_array = np.array(reward_forward_list)
     reward_ctrl_array = np.array(reward_ctrl_list)
     waypt_array = np.array(waypt_list)
@@ -150,7 +142,6 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "observed_tendon_data.npy"),observed_tendon_length_array)
     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
     np.save(os.path.join(saved_data_dir, "observed_cap_posi_data.npy"),observed_cap_posi_array)
-    np.save(os.path.join(saved_data_dir, "total_bar_contact_data.npy"),total_bar_contact_array)
     np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
     np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
@@ -223,6 +214,6 @@ if __name__ == "__main__":
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, args.sb3_algo, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
