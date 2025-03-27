@@ -8,6 +8,8 @@ import argparse
 import numpy as np
 
 def train(env, log_dir, model_dir, lr, gpu_idx):
+
+
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = sac.SACAgent(state_dim, action_dim)
