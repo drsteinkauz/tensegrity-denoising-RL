@@ -8,11 +8,10 @@ import argparse
 import numpy as np
 
 def train(env, log_dir, model_dir, lr, gpu_idx):
-
-
-    state_dim = env.observation_space.shape[0]
+    state_dim = env.state_shape
+    observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim, action_dim)
+    agent = sac.SACAgent(state_dim, observation_dim, action_dim)
 
     agent.lr = lr
     
@@ -26,7 +25,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     writer = SummaryWriter(log_dir)
 
     while True:
-        state = env.reset()[0]
+        state, observation = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -36,13 +35,15 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(state)
-            action_unscaled = action_scaled * 0.3 - 0.15
-            next_state, reward, done, _, info_env = env.step(action_unscaled)
-            agent.replay_buffer.push(state, action_scaled, reward, next_state, done)
+                action_scaled = agent.select_action(observation)
+            # action_unscaled = action_scaled * 0.3 - 0.15
+            action_unscaled = action_scaled * 0.05
+            next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
+            agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
             info_agent = agent.update()
             
             state = next_state
+            observation = next_observation
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
             episode_ctrl_reward += info_env["reward_ctrl"]
@@ -87,7 +88,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     actor.load_state_dict(torch.load(path_to_model, map_location=torch.device(device=device)))
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    obs = env.reset()[0]
+    _, obs = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -105,8 +106,9 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     iter = int(simulation_seconds/dt)
     for i in range(iter):
         action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
-        action_unscaled = action_scaled.detach() * 0.3 - 0.15
-        obs, _, done, _, info = env.step(action_unscaled.numpy())
+        # action_unscaled = action_scaled.detach() * 0.3 - 0.15
+        action_unscaled = action_scaled.detach() * 0.05
+        _, obs, _, done, _, info = env.step(action_unscaled.numpy())
 
 
 
@@ -162,7 +164,7 @@ if __name__ == "__main__":
     parser.add_argument('--test3', metavar='path_to_model', nargs=3)
     parser.add_argument('--tracking_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
-    parser.add_argument('--env_xml', default="3prism_jonathan_steady_side.xml", type=str,
+    parser.add_argument('--env_xml', default="3tr_will_normal_size.xml", type=str,
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
     parser.add_argument('--sb3_algo', default="SAC", type=str, choices=["SAC", "TD3", "A2C", "PPO"],
                         help='StableBaseline3 RL algorithm: SAC, TD3, A2C, PPO')

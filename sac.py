@@ -43,27 +43,27 @@ class QNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, observation_dim, action_dim):
         super(PolicyNetwork, self).__init__()
-        # self.mu = MLP(state_dim, action_dim)
+        # self.mu = MLP(observation_dim, action_dim)
         # self.log_std = nn.Parameter(torch.zeros(action_dim))
-        self.p = MLP(state_dim, 2*action_dim)
+        self.p = MLP(observation_dim, 2*action_dim)
 
         self.apply(weights_init_)
     
-    def forward(self, state):
-        # mean = self.mu(state)
+    def forward(self, observation):
+        # mean = self.mu(observation)
         # log_std = torch.clamp(self.log_std, min=-20, max=2)
         # std = torch.exp(log_std)
-        mu_sigma = self.p(state)
+        mu_sigma = self.p(observation)
         mean, log_std = mu_sigma.chunk(2, dim=-1)
         log_std = torch.clamp(log_std, min=-20, max=2)
         std = torch.exp(log_std)
         return mean, std
     
-    def sample(self, state):
+    def sample(self, observation):
         epsilon_tanh = 1e-6
-        mean, std = self.forward(state)
+        mean, std = self.forward(observation)
         dist = torch.distributions.Normal(mean, std)
         action_unbounded = dist.rsample()
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
@@ -73,9 +73,9 @@ class PolicyNetwork(nn.Module):
         mean_bounded = torch.tanh(mean)
         return action_bounded, action_log_prob, std
     
-    def predict(self, state):
+    def predict(self, observation):
         epsilon_tanh = 1e-6
-        mean, std = self.forward(state)
+        mean, std = self.forward(observation)
         dist = torch.distributions.Normal(mean, std)
         action_unbounded = dist.rsample()
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
@@ -87,11 +87,11 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, state_dim):
+    def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
     
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
+    def push(self, state, observation, action, reward, next_state, next_observation, done):
+        self.buffer.append((state, observation, action, reward, next_state, next_observation, done))
     
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
@@ -102,7 +102,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -123,7 +123,7 @@ class SACAgent:
         # self.actor = PolicyNetwork(state_dim, action_dim).to(self.device)
         # self.critic = QNetwork(state_dim, action_dim).to(self.device)
         # self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.actor = torch.nn.DataParallel(PolicyNetwork(state_dim, action_dim)).to(self.device)
+        self.actor = torch.nn.DataParallel(PolicyNetwork(observation_dim, action_dim)).to(self.device)
         self.critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
         self.target_critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
         
@@ -136,12 +136,12 @@ class SACAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(self.buffer_size, state_dim)
+        self.replay_buffer = ReplayBuffer(self.buffer_size)
     
-    def select_action(self, state):
-        state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
+    def select_action(self, observation):
+        observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
-            action, _, _ = self.actor.module.sample(state)
+            action, _, _ = self.actor.module.sample(observation)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
@@ -149,15 +149,17 @@ class SACAgent:
             return
         
         batch = self.replay_buffer.sample(self.batch_size)
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch = zip(*batch)
+        state_batch, observation_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, done_batch = zip(*batch)
         
         state_batch = torch.FloatTensor(state_batch).to(self.device)
+        observation_batch = torch.FloatTensor(observation_batch).to(self.device)
         action_batch = torch.FloatTensor(action_batch).to(self.device)
         reward_batch = torch.FloatTensor(reward_batch).to(self.device)
         next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
+        next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
         done_batch = torch.FloatTensor(done_batch).to(self.device)
 
-        sampled_action, action_log_prob, std = self.actor.module.sample(state_batch)
+        sampled_action, action_log_prob, std = self.actor.module.sample(observation_batch)
         
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
         # self.alpha = 0.0001
@@ -171,7 +173,7 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            sampled_action_next, action_log_prob_next, _ = self.actor.module.sample(next_state_batch)
+            sampled_action_next, action_log_prob_next, _ = self.actor.module.sample(next_observation_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)

@@ -155,6 +155,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 18
         if desired_action == "tracking" or desired_action == "aiming" or desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
+        
+        self.state_shape = obs_shape
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -258,7 +260,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_length = np.array(self.data.ten_length)
         tendon_length_6 = tendon_length[:6]
 
-        observation, observation_with_noise = self._get_obs()
+        state, observation = self._get_obs()
 
 
         if self._desired_action == "turn":
@@ -350,7 +352,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif self._desired_action == "vel_tracking":
             ang_vel_bwd = self._angle_normalize(psi_after - psi_before)/self.dt
             vel_bwd = np.array([self._x_velocity, self._y_velocity, ang_vel_bwd])
-            vel_cmd = observation[-3:]
+            vel_cmd = state[-3:]
             forward_reward = self._vel_track_rew(vel_cmd=vel_cmd, vel_bwd=vel_bwd)
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
@@ -399,10 +401,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         if self.render_mode == "human":
             self.render()
-        if self._use_obs_noise == False:
-            return observation, reward, terminated, False, info
-        else:
-            return observation_with_noise, reward, terminated, False, info
+        
+        return state, observation, reward, terminated, False, info
 
     def _get_obs(self):
         
@@ -447,14 +447,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         # position_r45 = self.data.geom("r45").xvelp
 
 
-        tendon_lengths = self.data.ten_length # 9
+        tendon_lengths = self.data.ten_length[-9:] # 9
         
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        observation = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
+        state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
                                     tendon_lengths))
-        observation_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+        state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
                                     tendon_lengths_with_noise))
         
         if self._use_cap_velocity:
@@ -494,10 +494,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             random = rng.standard_normal(size=3)
             vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
 
-            observation = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
+            state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
                                         vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5,\
                                         tendon_lengths))
-            observation_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
                                         vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise,\
                                         tendon_lengths_with_noise))
 
@@ -511,17 +511,22 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tgt_yaw = np.array([np.arctan2(tgt_drct[1], tgt_drct[0])])
             tgt_yaw_with_noise = np.array([np.arctan2(tgt_drct_with_noise[1], tgt_drct_with_noise[0])])
 
-            observation = np.concatenate((observation,\
+            state = np.concatenate((state,\
                                           tracking_vec, tgt_yaw))
-            observation_with_noise = np.concatenate((observation_with_noise,\
+            state_with_noise = np.concatenate((state_with_noise,\
                                                      tracking_vec_with_noise, tgt_yaw_with_noise))
         
         if self._desired_action == "vel_track":
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
-            observation = np.concatenate((observation, vel_cmd))
-            observation_with_noise = np.concatenate((observation_with_noise, vel_cmd))
+            state = np.concatenate((state, vel_cmd))
+            state_with_noise = np.concatenate((state_with_noise, vel_cmd))
+        
+        if self._use_obs_noise == True:
+            observation = state_with_noise
+        else:
+            observation = state
 
-        return observation, observation_with_noise
+        return state, observation
 
     def _angle_normalize(self, theta):
         if theta > np.pi:
@@ -742,12 +747,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if self._desired_action == "turn" or self._desired_action == "aiming":
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
-        observation, observation_with_noise = self._get_obs()
+        state, observation = self._get_obs()
 
-        if self._use_obs_noise == False:
-            return observation
-        else:
-            return observation_with_noise
+        return state, observation
 
     def viewer_setup(self):
         assert self.viewer is not None
