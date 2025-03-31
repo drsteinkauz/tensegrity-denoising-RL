@@ -22,7 +22,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     step_num = 0
     eps_num = 0
 
-    writer = SummaryWriter(log_dir)
+    writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
 
     while True:
         state, observation = env.reset()[0]
@@ -85,7 +85,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
-    actor.load_state_dict(torch.load(path_to_model, map_location=torch.device(device=device)))
+    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
     _, obs = env.reset()[0]
@@ -95,9 +97,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     dt = env.dt
     actions_list = []
     tendon_length_list = []
-    observed_tendon_length_list = []
     cap_posi_list = []
-    observed_cap_posi_list = []
     reward_forward_list = []
     reward_ctrl_list = []
     waypt_list = []
@@ -116,9 +116,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
-        observed_tendon_length_list.append(obs[-9:])
         cap_posi_list.append(info["real_observation"][:18])
-        observed_cap_posi_list.append(obs[:18])
         reward_forward_list.append(info["reward_forward"])
         reward_ctrl_list.append(info["reward_ctrl"])
         waypt_list.append(info["waypt"])
@@ -133,9 +131,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
     action_array = np.array(actions_list)
     tendon_length_array = np.array(tendon_length_list)
-    observed_tendon_length_array = np.array(observed_tendon_length_list)
     cap_posi_array = np.array(cap_posi_list)
-    observed_cap_posi_array = np.array(observed_cap_posi_list)
     reward_forward_array = np.array(reward_forward_list)
     reward_ctrl_array = np.array(reward_ctrl_list)
     waypt_array = np.array(waypt_list)
@@ -143,9 +139,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     y_pos_array = np.array(y_pos_list)
     np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
     np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
-    np.save(os.path.join(saved_data_dir, "observed_tendon_data.npy"),observed_tendon_length_array)
     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
-    np.save(os.path.join(saved_data_dir, "observed_cap_posi_data.npy"),observed_cap_posi_array)
     np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
     np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)

@@ -176,7 +176,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         )
 
     def control_cost(self, action, tendon_length_6):
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
+        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
+        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
         # control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
@@ -302,7 +303,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             forward_reward = self._desired_direction*\
                                 (np.sqrt((x_position_after-x_position_before)**2 + \
                                         (y_position_after - y_position_before)**2) *\
-                                np.cos(psi_diff)/ self.dt)
+                                np.cos(psi_diff)/ self.dt) * 5.0
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
@@ -561,8 +562,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return lin_track_rew + ang_track_rew
     
     def _action_filter(self, action, last_action):
-        k_FILTER = 1
-        filtered_action = last_action + k_FILTER*(action - last_action)*self.dt
+        k_FILTER = 5
+        vel_constraint = 0.1
+
+        # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
+        # del_action = k_FILTER*(action - last_action)*self.dt
+        del_action = action / 0.05 * vel_constraint*self.dt
+
+        filtered_action = last_action + del_action
         return filtered_action
 
     def _reset_cap_size(self, noise_range):
