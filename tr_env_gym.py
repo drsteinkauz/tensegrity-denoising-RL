@@ -28,9 +28,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self,
         xml_file=os.path.join(os.getcwd(),"3prism_jonathan_steady_side.xml"),
         use_contact_forces=False,
+        use_tendon_length=False,
         use_cap_velocity=True,
-        use_obs_noise = False,
-        use_cap_size_noise = False,
+        use_obs_noise=True,
+        use_cap_size_noise=False,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -49,7 +50,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         reward_delay_seconds = 0.02, # 0.5,
         contact_with_self_penalty = 0.0,
         obs_noise_tendon_stdev = 0.02,
-        obs_noise_cap_pos_stdev = 0.05,
+        obs_noise_cap_pos_stdev = 0.01,
         cap_size_noise_range = (0.04, 0.09),
         way_pts_range = (2.5, 3.5),
         way_pts_angle_range = (-np.pi/6, np.pi/6),
@@ -65,6 +66,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self,
             xml_file,
             use_contact_forces,
+            use_tendon_length,
             use_cap_velocity,
             use_obs_noise,
             use_cap_size_noise,
@@ -105,6 +107,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._desired_direction = desired_direction
         self._reset_psi = 0
         self._psi_wrap_around_count = 0
+        self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
         
         self._oripoint = np.array([0.0, 0.0])
@@ -148,7 +151,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         self._contact_with_self_penalty = contact_with_self_penalty
 
-        obs_shape = 27
+        obs_shape = 18
+        if use_tendon_length:
+            obs_shape += 9
         if use_contact_forces:
             obs_shape += 84
         if use_cap_velocity:
@@ -177,8 +182,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
     def control_cost(self, action, tendon_length_6):
         # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
-        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
+        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
+        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
     @property
@@ -453,10 +458,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
-                                    tendon_lengths))
-        state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
-                                    tendon_lengths_with_noise))
+        state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
+        state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
@@ -496,11 +499,13 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
 
             state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
-                                        vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5,\
-                                        tendon_lengths))
+                                        vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
             state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
-                                        vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise,\
-                                        tendon_lengths_with_noise))
+                                        vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
+            
+        if self._use_tendon_length:
+            state = np.concatenate((state, tendon_lengths))
+            state_with_noise = np.concatenate((state_with_noise, tendon_lengths_with_noise))
 
         if self._desired_action == "tracking" or self._desired_action == "aiming":
             tracking_vec = self._waypt - pos_center[:2]
