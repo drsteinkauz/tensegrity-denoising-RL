@@ -151,13 +151,14 @@ class SACAgent:
         batch = self.replay_buffer.sample(self.batch_size)
         state_batch, observation_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, done_batch = zip(*batch)
         
-        state_batch = torch.FloatTensor(state_batch).to(self.device)
-        observation_batch = torch.FloatTensor(observation_batch).to(self.device)
-        action_batch = torch.FloatTensor(action_batch).to(self.device)
-        reward_batch = torch.FloatTensor(reward_batch).to(self.device)
-        next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
-        next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
-        done_batch = torch.FloatTensor(done_batch).to(self.device)
+        with torch.no_grad():
+            state_batch = torch.FloatTensor(state_batch).to(self.device)
+            observation_batch = torch.FloatTensor(observation_batch).to(self.device)
+            action_batch = torch.FloatTensor(action_batch).to(self.device)
+            reward_batch = torch.FloatTensor(reward_batch).to(self.device)
+            next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
+            next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
+            done_batch = torch.FloatTensor(done_batch).to(self.device)
 
         sampled_action, action_log_prob, std = self.actor.module.sample(observation_batch)
         
