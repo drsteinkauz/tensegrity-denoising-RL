@@ -1,5 +1,6 @@
 import sac
 import tr_env_gym
+import transformer
 
 import os
 import torch
@@ -12,6 +13,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = sac.SACAgent(state_dim, observation_dim, action_dim)
+    otf = transformer.OnlineTransformer(input_dim=27, output_dim=49, d_model=512, num_encoder_layers=7, num_decoder_layers=7, nheads=8, dropout=0.4, batch_size=256, dim_feedforward=512)
 
     agent.lr = lr
     
@@ -41,6 +43,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
             agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
             info_agent = agent.update()
+
+            info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=1e-4)
+            feature = otf.get_feature(type_index=0)
             
             state = next_state
             observation = next_observation
