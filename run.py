@@ -33,6 +33,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         episode_forward_reward = 0
         episode_ctrl_reward = 0
 
+        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=1e-4)
+        feature = otf.get_feature(type_index=0)
+
         while True:
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
@@ -41,14 +44,17 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
             next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
-            agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
-            info_agent = agent.update()
 
-            info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=1e-4)
-            feature = otf.get_feature(type_index=0)
+            info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=1e-4)
+            next_feature = otf.get_feature(type_index=0)
+
+            agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
+            info_agent = agent.update()
             
             state = next_state
             observation = next_observation
+            feature = next_feature
+
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
             episode_ctrl_reward += info_env["reward_ctrl"]
