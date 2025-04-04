@@ -13,7 +13,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = sac.SACAgent(state_dim, observation_dim, action_dim)
-    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=512, num_encoder_layers=7, num_decoder_layers=7, nheads=8, dropout=0.4, batch_size=256, dim_feedforward=512)
+    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=512, num_encoder_layers=7, num_decoder_layers=7, nhead=8, dropout=0.4, batch_size=256, dim_feedforward=512)
 
     agent.lr = lr
     
