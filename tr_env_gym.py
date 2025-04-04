@@ -549,10 +549,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
             state = np.concatenate((state, vel_cmd))
             state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-
-        state = np.concatenate((state, self.model.geom_friction[0,0], 
-                                self.model.tendon_damping[6], self.model.tendon_damping[12], 
-                                self.model.tendon_stiffness[6], self.model.tendon_stiffness[12]))
+        state = np.concatenate((state, [self.model.geom_friction[0,0]], 
+                                [self.model.tendon_damping[6]], [self.model.tendon_damping[12]], 
+                                [self.model.tendon_stiffness[6]], [self.model.tendon_stiffness[12]]))
 
         return state, observation
 

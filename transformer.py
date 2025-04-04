@@ -187,7 +187,7 @@ class OnlineTransformer(nn.Module):
         memory (torch.Tensor): The memory buffer to store previous input embeddings.
     """
     def __init__(self, input_dim,output_dim,d_model, nhead, num_encoder_layers, num_decoder_layers, 
-                 dim_feedforward=128, dropout=0.1, memory_size=100,batch_size=32, device = "cuda:2",
+                 dim_feedforward=128, dropout=0.1, memory_size=100,batch_size=32, device = "cuda",
                  ):
         super(OnlineTransformer, self).__init__()
         self.device = device
@@ -464,6 +464,7 @@ class OnlineTransformer(nn.Module):
                 T_mult=2,        
                 eta_min=1e-4     
             )
+        print("noised_input.shape",noised_input.shape,self.memory.shape)
         self.memory = torch.cat((self.memory[:,1:], noised_input.unsqueeze(1).to(self.device)), dim=1) # (batch_size, memory_size, d_model)
         input = self.normalize_x(self.memory)
         label = torch.cat((self.normalize_noise(previledge[:,:27].to(self.device)),previledge[:,27:].to(self.device)),dim=1)
