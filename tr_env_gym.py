@@ -31,7 +31,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_tendon_length=False,
         use_cap_velocity=True,
         use_obs_noise=True,
-        use_cap_size_noise=False,
+        use_inherent_params_dr=True,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -48,10 +48,19 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_max_length = 0.05, # 0.15,
         tendon_min_length = -0.05, # -0.45,
         reward_delay_seconds = 0.02, # 0.5,
+        # friction_noise_range = (0.25, 2.0),
+        # damping_noise_range_side = (0.25, 4.0),
+        # damping_noise_range_cross = (2.5, 40),
+        # stiffness_noise_range_side = (5, 20),
+        # stiffness_noise_range_cross = (75, 300),
+        friction_noise_range = (1, 1),
+        damping_noise_range_side = (1, 1),
+        damping_noise_range_cross = (10, 10),
+        stiffness_noise_range_side = (10, 10),
+        stiffness_noise_range_cross = (150, 150),
         contact_with_self_penalty = 0.0,
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
-        cap_size_noise_range = (0.04, 0.09),
         way_pts_range = (2.5, 3.5),
         way_pts_angle_range = (-np.pi/6, np.pi/6),
         threshold_waypt = 0.05,
@@ -69,7 +78,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             use_tendon_length,
             use_cap_velocity,
             use_obs_noise,
-            use_cap_size_noise,
+            use_inherent_params_dr,
             terminate_when_unhealthy,
             is_test,
             desired_action,
@@ -86,10 +95,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tendon_max_length,
             tendon_min_length,
             reward_delay_seconds,
+            friction_noise_range,
+            damping_noise_range_side,
+            damping_noise_range_cross,
+            stiffness_noise_range_side,
+            stiffness_noise_range_cross,
             contact_with_self_penalty,
             obs_noise_tendon_stdev,
             obs_noise_cap_pos_stdev,
-            cap_size_noise_range,
             way_pts_range,
             way_pts_angle_range,
             threshold_waypt,
@@ -128,8 +141,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._use_obs_noise = use_obs_noise
         self._obs_noise_tendon_stdev = obs_noise_tendon_stdev
         self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev
-        self._use_cap_size_noise = use_cap_size_noise
-        self._cap_size_noise_range = cap_size_noise_range
+        self._use_inherent_params_dr = use_inherent_params_dr
 
         self._min_reset_heading = min_reset_heading
         self._max_reset_heading = max_reset_heading
@@ -137,6 +149,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._tendon_reset_stdev = tendon_reset_stdev
         self._tendon_max_length = tendon_max_length
         self._tendon_min_length = tendon_min_length
+
+        self._friction_noise_range = friction_noise_range
+        self._damping_noise_range_side = damping_noise_range_side
+        self._damping_noise_range_cross = damping_noise_range_cross
+        self._stiffness_noise_range_side = stiffness_noise_range_side
+        self._stiffness_noise_range_cross = stiffness_noise_range_cross
 
         self._healthy_reward = healthy_reward
         self._terminate_when_unhealthy = terminate_when_unhealthy
@@ -461,6 +479,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
         state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
+        if self._use_obs_noise == True:
+            observation = state_with_noise
+        else:
+            observation = state
+
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
 
@@ -526,11 +549,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
             state = np.concatenate((state, vel_cmd))
             state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-        
-        if self._use_obs_noise == True:
-            observation = state_with_noise
-        else:
-            observation = state
+
+        state = np.concatenate((state, self.model.geom_friction[0,0], 
+                                self.model.tendon_damping[6], self.model.tendon_damping[12], 
+                                self.model.tendon_stiffness[6], self.model.tendon_stiffness[12]))
 
         return state, observation
 
@@ -577,35 +599,24 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         filtered_action = last_action + del_action
         return filtered_action
 
-    def _reset_cap_size(self, noise_range):
-        cap_size_noise_low, cap_size_noise_high = noise_range
-        cap_size = np.random.uniform(low=cap_size_noise_low, high=cap_size_noise_high)
+    def _reset_inherent_params(self):
+        friction_coeff = np.random.uniform(self._friction_noise_range[0], self._friction_noise_range[1])
+        damping_coeff = np.array([np.random.uniform(self._damping_noise_range_side[0], self._damping_noise_range_side[1]), np.random.uniform(self._damping_noise_range_cross[0], self._damping_noise_range_cross[1])])
+        stiffness_coeff = np.array([np.random.uniform(self._stiffness_noise_range_side[0], self._stiffness_noise_range_side[1]), np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])])
 
-        for i in range(self.model.ngeom):
-            geom_name = self.model.geom_names[i].decode('utf-8')
-            print(f"Index: {i}, Name: {geom_name}")
-
-        cap_0_id = self.model.geom_name2id('s0')
-        cap_1_id = self.model.geom_name2id('s1')
-        cap_2_id = self.model.geom_name2id('s2')
-        cap_3_id = self.model.geom_name2id('s3')
-        cap_4_id = self.model.geom_name2id('s4')
-        cap_5_id = self.model.geom_name2id('s5')
-
-        self.model.geom_size[cap_0_id] = cap_size
-        self.model.geom_size[cap_1_id] = cap_size
-        self.model.geom_size[cap_2_id] = cap_size
-        self.model.geom_size[cap_3_id] = cap_size
-        self.model.geom_size[cap_4_id] = cap_size
-        self.model.geom_size[cap_5_id] = cap_size
+        self.model.geom_friction[:, 0] = friction_coeff
+        self.model.tendon_damping[6:12] = damping_coeff[0]
+        self.model.tendon_damping[12:15] = damping_coeff[1]
+        self.model.tendon_stiffness[6:12] = stiffness_coeff[0]
+        self.model.tendon_stiffness[12:15] = stiffness_coeff[1]
         return
 
 
     def reset_model(self):
         self._psi_wrap_around_count = 0
 
-        if self._use_cap_size_noise == True:
-            self._reset_cap_size(self._cap_size_noise_range)
+        if self._use_inherent_params_dr:
+            self._reset_inherent_params()
 
         # '''
         # with rolling noise start
