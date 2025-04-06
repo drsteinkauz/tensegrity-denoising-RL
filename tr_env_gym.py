@@ -763,13 +763,22 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._lin_vel_cmd = np.array([lin_vel_scale*np.cos(self._reset_psi), lin_vel_scale*np.sin(self._reset_psi)])
             self._ang_vel_cmd = 0.0
                 
+        obs_act_seq = []
+        for i in range(64):
+            self.do_simulation(tendons, self.frame_skip)
+            _, observation = self._get_obs()
+            action = self.data.ctrl[:].copy()
+            obs_act_seq.append(np.concatenate((observation, action)))
+        obs_act_seq = np.array(obs_act_seq)
+
         self._step_num = 0
         if self._desired_action == "turn" or self._desired_action == "aiming":
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
+        
         state, observation = self._get_obs()
 
-        return state, observation
+        return state, observation, obs_act_seq
 
     def viewer_setup(self):
         assert self.viewer is not None

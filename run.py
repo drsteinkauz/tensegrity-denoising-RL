@@ -11,7 +11,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim, observation_dim, action_dim)
+    agent = sac.SACAgent(state_dim, observation_dim, action_dim, 32)
 
     agent.lr = lr
     
@@ -25,7 +25,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
 
     while True:
-        state, observation = env.reset()[0]
+        # state, observation = env.reset()[0]
+        state, observation, obs_act_seq = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -35,11 +36,13 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(observation)
+                action_scaled = agent.select_action(obs_act_seq)
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
             next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
-            agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
+            next_obs_act = np.concatenate((next_observation, action_scaled))
+            next_obs_act_seq = np.concatenate((next_obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
+            agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
             info_agent = agent.update()
             
             state = next_state

@@ -84,14 +84,48 @@ class PolicyNetwork(nn.Module):
     def to(self, device):
         self.device = device
         return super(PolicyNetwork, self).to(device)
+    
+class GRUAutoEncoder(nn.Module):
+    def __init__(self, input_dim, feature_dim, output_dim, hidden_dim=256):
+        super(GRUAutoEncoder, self).__init__()
+        self.gru = nn.GRU(input_dim, hidden_dim, batch_first=True)
+        self.encoder = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, feature_dim),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+        self.apply(weights_init_)
+
+    def encode(self, x):
+        # x: (batch_size, seq_len, input_dim)
+        out, hidden_n = self.gru(x)
+        last_out = out[:, -1, :]
+        feature = self.encoder(last_out)
+        return feature
+    
+    def decode(self, feature):
+        # feature: (batch_size, feature_dim)
+        decoded = self.decoder(feature)
+        return decoded
+
+    def forward(self, x):
+        # x: (batch_size, seq_len, input_dim)
+        feature = self.encode(x)
+        decoded = self.decode(feature)
+        return decoded
 
 # Replay buffer class
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
     
-    def push(self, state, observation, action, reward, next_state, next_observation, done):
-        self.buffer.append((state, observation, action, reward, next_state, next_observation, done))
+    def push(self, state, observation, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done):
+        self.buffer.append((state, observation, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done))
     
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
@@ -102,7 +136,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, feature_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -110,10 +144,12 @@ class SACAgent:
         self.gamma = 0.99       # Discount factor
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
+        self.lr_GAE = 1e-3       # Learning rate for GRUAutoEncoder
         self.batch_size = 256    # Batch size
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
+        self.lambda_for_GAE = 0.1
 
         # self.alpha = 1          # Entropy coefficient # 0.2
         self.log_ent_coef = torch.zeros(1).to(self.device).requires_grad_(True)
@@ -123,9 +159,10 @@ class SACAgent:
         # self.actor = PolicyNetwork(state_dim, action_dim).to(self.device)
         # self.critic = QNetwork(state_dim, action_dim).to(self.device)
         # self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.actor = torch.nn.DataParallel(PolicyNetwork(observation_dim, action_dim)).to(self.device)
+        self.actor = torch.nn.DataParallel(PolicyNetwork(feature_dim, action_dim)).to(self.device)
         self.critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
         self.target_critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
+        self.gruautoencoder = torch.nn.DataParallel(GRUAutoEncoder(observation_dim+action_dim, feature_dim, state_dim)).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -134,14 +171,16 @@ class SACAgent:
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
+        self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GAE)
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(self.buffer_size)
     
-    def select_action(self, observation):
-        observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
+    def select_action(self, obs_act_seq):
+        obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
+        feature = self.gruautoencoder.module.encode(obs_act_seq)
         with torch.no_grad():
-            action, _, _ = self.actor.module.sample(observation)
+            action, _, _ = self.actor.module.sample(feature)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
@@ -149,21 +188,31 @@ class SACAgent:
             return
         
         batch = self.replay_buffer.sample(self.batch_size)
-        state_batch, observation_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, done_batch = zip(*batch)
+        state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = zip(*batch)
         
         with torch.no_grad():
             state_batch = torch.FloatTensor(state_batch).to(self.device)
             observation_batch = torch.FloatTensor(observation_batch).to(self.device)
+            obs_act_seq_batch = torch.FloatTensor(obs_act_seq_batch).to(self.device)
             action_batch = torch.FloatTensor(action_batch).to(self.device)
             reward_batch = torch.FloatTensor(reward_batch).to(self.device)
             next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
             next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
+            next_obs_act_seq_batch = torch.FloatTensor(next_obs_act_seq_batch).to(self.device)
             done_batch = torch.FloatTensor(done_batch).to(self.device)
 
-        sampled_action, action_log_prob, std = self.actor.module.sample(observation_batch)
+        feature_batch = self.gruautoencoder.module.encode(obs_act_seq_batch)
+        sampled_action, action_log_prob, std = self.actor.module.sample(feature_batch.detach())
+
+        # GRUAutoEncoder update
+        predicted_state = self.gruautoencoder.module.decode(feature_batch)
+        predict_loss = 0.5*F.mse_loss(predicted_state, state_batch) + self.lambda_for_GAE * torch.norm(feature_batch, p=1, dim=1).mean()
+
+        self.gruautoencoder_optimizer.zero_grad()
+        predict_loss.backward()
+        self.gruautoencoder_optimizer.step()
         
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
-        # self.alpha = 0.0001
 
         # entropy coefficient update
         ent_coef_loss = -(self.log_ent_coef * (action_log_prob + self._target_entropy).detach()).mean()
@@ -174,7 +223,8 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            sampled_action_next, action_log_prob_next, _ = self.actor.module.sample(next_observation_batch)
+            next_feature_batch = self.gruautoencoder.module.encode(next_obs_act_seq_batch)
+            sampled_action_next, action_log_prob_next, _ = self.actor.module.sample(next_feature_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
@@ -186,7 +236,7 @@ class SACAgent:
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
-
+        
         # Actor update
         q1_pi, q2_pi = self.critic(state_batch, sampled_action)
         q_value_pi = torch.min(q1_pi, q2_pi)
@@ -195,6 +245,7 @@ class SACAgent:
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
 
         # Soft target update
         for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
