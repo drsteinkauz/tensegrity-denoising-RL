@@ -62,7 +62,6 @@ class AdaptiveBatchNorm1d(nn.BatchNorm1d):
         valid_features = x_reshaped[:, :active_dim]
         mean = valid_features.mean(dim=0)
         var = valid_features.var(dim=0, unbiased=False)
-            
         self.running_mean[:active_dim] = (
                 (1 - self.momentum) * self.running_mean[:active_dim] 
                 + self.momentum * mean.detach()
@@ -200,6 +199,8 @@ class OnlineTransformer(nn.Module):
         self.memory_size = memory_size
         self.input_embedding = nn.Linear(input_dim, d_model)
         self.batch_size = batch_size
+        self.input_dim = input_dim
+        self.output_dim = output_dim
         
         self.pre_layer = nn.Sequential(
             nn.Linear(input_dim, d_model),
@@ -224,8 +225,8 @@ class OnlineTransformer(nn.Module):
         self.m_output = nn.Sequential(nn.Linear(d_model, d_model),
                                       nn.ReLU(),
                                       nn.Linear(d_model, 64))
-        self.bn_p = AdaptiveBatchNorm1d(output_dim)
-        self.bn_o = AdaptiveBatchNorm1d(input_dim)
+        self.bn_p = AdaptiveBatchNorm1d(input_dim)
+        self.bn_o = AdaptiveBatchNorm1d(output_dim)
         
         self.apply(he_init)
         self.to(device)
@@ -280,8 +281,8 @@ class OnlineTransformer(nn.Module):
         decoder_output = self.transformer_decoder(feature, feature)  # (seq_length, batch_size, d_model)
         self.last_feature = decoder_output.permute(1, 0, 2)
         reconstructed = self.output_layer(decoder_output) # (seq_length, batch_size, output_dim)
+        
         res = reconstructed[-1]
-        self.input_estimate = torch.cat((res[...,:27]+ self.bn_o.denormalize(x[:,-1]),res[...,27:]),dim=1) # (batch_size, input_dim)
         return reconstructed
 
         
@@ -290,9 +291,9 @@ class OnlineTransformer(nn.Module):
         Returns the feature representation of the input data.
         Args:
             type_index (int): The type of feature to return. 
-            0 for reconstructed input, 49 dim, [cap_pos, ten_len, cap_vel, damping, friction],
-            1 for reconstructed input + m feature, (49+64)dim, [cap_pos, ten_len, cap_vel, damping, friction, m_feature].
-            2 for observation + last_feature, (45+64)dim, [cap_pos_noisy, ten_len_noisy, cap_vel_noisy, last_feature].
+            0 for reconstructed input, 41 dim, [cap_pos, ten_len, cap_vel, damping, friction],
+            1 for reconstructed input + m feature, (41+64)dim, [cap_pos, ten_len, cap_vel, damping, friction, m_feature].
+            2 for observation + last_feature, (18+64)dim, [cap_pos_noisy, ten_len_noisy, cap_vel_noisy, last_feature].
         """
         if type_index == 0:
             self.feature = self.input_estimate.detach() # (batch_size, output_dim)
@@ -451,7 +452,9 @@ class OnlineTransformer(nn.Module):
     
     def update(self, noised_input, previledge,epoch,learning_rate=1e-3,optimizer = None,creiterion = None,scheduler = None):
         """
-        Updates the memory buffer with the current input data.
+        Updates the memory buffer with the current input TORCH data.
+        noised_input: The current input data with noise, (batch_size, input_dim).
+        previledge: The priviledge data with shape (batch_size, input_dim).
         """
         if optimizer is None:
             optimizer = Adam(self.parameters(), lr=learning_rate)
@@ -464,12 +467,13 @@ class OnlineTransformer(nn.Module):
                 T_mult=2,        
                 eta_min=1e-4     
             )
-        print("noised_input.shape",noised_input.shape,self.memory.shape)
         self.memory = torch.cat((self.memory[:,1:], noised_input.unsqueeze(1).to(self.device)), dim=1) # (batch_size, memory_size, d_model)
         input = self.normalize_x(self.memory)
-        label = torch.cat((self.normalize_noise(previledge[:,:27].to(self.device)),previledge[:,27:].to(self.device)),dim=1)
+        label = self.normalize_noise(previledge.to(self.device))
         res = self(input)
         reconstructed = res[-1,...]
+        res_denorm = self.bn_o.denormalize(reconstructed)
+        self.input_estimate = torch.cat((res_denorm[...,:self.input_dim]+ self.bn_p.denormalize(input[:,-1,:]),res_denorm[...,self.input_dim:]),dim=-1) # (batch_size, input_dim)
         loss = creiterion(reconstructed, label)
         loss.backward()
         optimizer.step()

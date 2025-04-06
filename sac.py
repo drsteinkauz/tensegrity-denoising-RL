@@ -69,6 +69,7 @@ class PolicyNetwork(nn.Module):
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
         action_log_prob = dist.log_prob(action_unbounded)
         action_log_prob -= torch.log(1 - action_bounded.pow(2) + epsilon_tanh)
+        #print(action_log_prob)
         action_log_prob = action_log_prob.sum(1, keepdim=True)
         mean_bounded = torch.tanh(mean)
         return action_bounded, action_log_prob, std
@@ -87,22 +88,33 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
+    def __init__(self, capacity, batch_size=256):
+        self.batch_size = batch_size
+        self.buffer = [deque(maxlen=capacity) for idx in range(batch_size)]
     
     def push(self, state, observation, action, reward, next_state, next_observation, done):
-        self.buffer.append((state, observation, action, reward, next_state, next_observation, done))
+        for i in range(self.batch_size):
+            self.buffer[i].append((
+                    state[i],
+                    observation[i],
+                    action[i],
+                    reward[i],
+                    next_state[i],
+                    next_observation[i],
+                    done[i]
+                ))
     
     def sample(self, batch_size):
-        return random.sample(self.buffer, batch_size)
+        
+        return random.sample(self.buffer[0], batch_size)
     
     def size(self):
-        return len(self.buffer)
+        return len(self.buffer[0])
 
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"), batch_size=4):
         # Device
         self.device = device
 
@@ -111,7 +123,7 @@ class SACAgent:
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
         self.batch_size = 256    # Batch size
-        self.buffer_size = 1000000 # Replay buffer size
+        self.buffer_size = 1000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
 
@@ -136,29 +148,32 @@ class SACAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(self.buffer_size)
+        self.replay_buffer = ReplayBuffer(self.buffer_size, batch_size)
     
     def select_action(self, observation):
-        observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
+        observation = torch.stack([tensor.to(self.device) for tensor in observation])
+        #observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
             action, _, _ = self.actor.module.sample(observation)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
+            
         if self.replay_buffer.size() < self.batch_size:
             return
         
         batch = self.replay_buffer.sample(self.batch_size)
         state_batch, observation_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, done_batch = zip(*batch)
-        
         with torch.no_grad():
-            state_batch = torch.FloatTensor(state_batch).to(self.device)
-            observation_batch = torch.FloatTensor(observation_batch).to(self.device)
-            action_batch = torch.FloatTensor(action_batch).to(self.device)
+            state_batch = torch.stack([tensor.to(self.device) for tensor in state_batch])
+            observation_batch = torch.stack([tensor.to(self.device) for tensor in observation_batch])
+            next_state_batch = torch.stack([tensor.to(self.device) for tensor in next_state_batch])
+            next_observation_batch = torch.stack([tensor.to(self.device) for tensor in next_observation_batch])
+            action_batch = torch.FloatTensor(np.array(action_batch)).to(self.device)
             reward_batch = torch.FloatTensor(reward_batch).to(self.device)
-            next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
-            next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
             done_batch = torch.FloatTensor(done_batch).to(self.device)
+            
+            #done_batch = torch.FloatTensor(done_batch).to(self.device)
 
         sampled_action, action_log_prob, std = self.actor.module.sample(observation_batch)
         
