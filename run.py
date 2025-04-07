@@ -54,7 +54,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         episode_len = 0
         episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
         episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
-        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=self.lr)
+        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=lr_Transformer)
         feature = otf.get_feature(type_index=feature_type)
         
         
@@ -246,8 +246,7 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)for _ in range(args.batch_size)]
         
-        train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, 
-              lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size)
+        train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size)
 
     if(args.test):
         if os.path.isfile(args.test):
