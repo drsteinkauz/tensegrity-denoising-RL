@@ -8,12 +8,32 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
 
-def train(env, log_dir, model_dir, lr, gpu_idx):
-    state_dim = env.state_shape
-    observation_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim, observation_dim, action_dim)
-    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=512, num_encoder_layers=7, num_decoder_layers=7, nheads=8, dropout=0.4, batch_size=256, dim_feedforward=512)
+def batched_step(env, action,batch_size,device):
+    """
+    Takes a batch of actions and steps the environment for each action.
+    """
+    next_state, next_observation, reward, done, _, info_env = zip(*[
+        env[i].step(action[i]) for i in range(len(env))
+    ])
+    next_state = torch.tensor(np.array(next_state), dtype=torch.float32, device=device)
+    next_observation = torch.tensor(np.array(next_observation), dtype=torch.float32, device=device)
+    reward = np.array(reward, dtype=np.float32)
+    done = np.array(done, dtype=bool)
+    info_env = list(info_env)
+    return next_state, next_observation, reward, done, info_env
+
+def train(env, log_dir, model_dir, lr, device, batch_size, feature_type=0):
+    feature_list = [41,105,82]
+    state_dim = env[0].state_shape+5 # 5 is the number for damping and friction
+    observation_dim = feature_list[feature_type]
+    action_dim = env[0].action_space.shape[0]
+    # print("state_dim", state_dim)
+    # print("observation_dim", observation_dim)
+    # print("action_dim", action_dim)
+    agent = sac.SACAgent(state_dim, observation_dim, action_dim, device=device, batch_size=batch_size)
+    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=512, num_encoder_layers=7, 
+                                        num_decoder_layers=7, nhead=8, dropout=0.4, batch_size=batch_size, 
+                                        dim_feedforward=512,device=device)
 
     agent.lr = lr
     
@@ -27,37 +47,39 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
 
     while True:
-        state, observation = env.reset()[0]
-        episode_reward = 0
+        state, observation = zip(*(env[i].reset()[0] for i in range(batch_size)))
+        state = torch.from_numpy(np.array(state)).float()
+        observation = torch.from_numpy(np.array(observation)).float()
+        episode_reward = np.array([0.0 for _ in range(batch_size)])
         episode_len = 0
-        episode_forward_reward = 0
-        episode_ctrl_reward = 0
-
+        episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
+        episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
         info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=1e-4)
-        feature = otf.get_feature(type_index=0)
-
+        feature = otf.get_feature(type_index=feature_type)
+        
+        
         while True:
+            #print(observation.shape)
             if step_num < agent.warmup_steps:
-                action_scaled = np.random.uniform(-1, 1, size=(6,))
+                action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
             else:
-                action_scaled = agent.select_action(observation)
+                #action_scaled = [agent.select_action(feature[idx]) for idx in range(batch_size)]
+                action_scaled = agent.select_action(feature)
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
-            next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
-
+            next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
             info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=1e-4)
             next_feature = otf.get_feature(type_index=0)
-
+            #print("feature",feature.shape, next_feature.shape)
             agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
             info_agent = agent.update()
-            
             state = next_state
             observation = next_observation
             feature = next_feature
-
-            episode_reward += reward
-            episode_forward_reward += info_env["reward_forward"]
-            episode_ctrl_reward += info_env["reward_ctrl"]
+            for idx in range(batch_size):
+                episode_reward[idx] += reward[idx]
+                episode_forward_reward[idx] += info_env[idx]["reward_forward"]
+                episode_ctrl_reward[idx] += info_env[idx]["reward_ctrl"]
 
             step_num += 1
             episode_len += 1
@@ -73,89 +95,95 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done or episode_len >= 5000:
+            if done.any() or episode_len >= 5000:
                 break
-        
-        eps_num += 1
-        writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
-        writer.add_scalar("ep/ep_len", episode_len, eps_num)
-        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
-
-        print("--------------------------------")
-        print(f"Episode {eps_num}")
-        print(f"ep_rew: {episode_reward}")
-        print(f"ep_fw_rew: {episode_forward_reward}")
-        print(f"ep_ctrl_rew: {episode_ctrl_reward}")
-        print(f"ep_len: {episode_len}")
-        print(f"step_num: {step_num}")
-        print(f"learning_rate: {agent.lr}")
-        print("--------------------------------")
+            
+            eps_num += 1
+            writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
+            writer.add_scalar("ep/ep_len", episode_len, eps_num)
+            writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
+            
+            if eps_num % 50 == 0:
+                print("--------------------------------")
+                print(f"Episode {eps_num}")
+                print(f"ep_rew: {episode_reward}")
+                print(f"ep_fw_rew: {episode_forward_reward}")
+                print(f"ep_ctrl_rew: {episode_ctrl_reward}")
+                print(f"ep_len: {episode_len}")
+                print(f"step_num: {step_num}")
+                print(f"learning_rate: {agent.lr}")
+                print("--------------------------------")
     
     writer.close()
 
+    
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
-    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    actor.load_state_dict(state_dict)
-    os.makedirs(saved_data_dir, exist_ok=True)
+    """
+    Test is to be modified.
+    """
+    pass
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+#     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+#     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+#     actor.load_state_dict(state_dict)
+#     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs = env.reset()[0]
-    done = False
-    extra_steps = 500
+#     _, obs = env.reset()[0]
+#     done = False
+#     extra_steps = 500
 
-    dt = env.dt
-    actions_list = []
-    tendon_length_list = []
-    cap_posi_list = []
-    reward_forward_list = []
-    reward_ctrl_list = []
-    waypt_list = []
-    x_pos_list = []
-    y_pos_list = []
-    iter = int(simulation_seconds/dt)
-    for i in range(iter):
-        action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
-        # action_unscaled = action_scaled.detach() * 0.3 - 0.15
-        action_unscaled = action_scaled.detach() * 0.05
-        _, obs, _, done, _, info = env.step(action_unscaled.numpy())
+#     dt = env.dt
+#     actions_list = []
+#     tendon_length_list = []
+#     cap_posi_list = []
+#     reward_forward_list = []
+#     reward_ctrl_list = []
+#     waypt_list = []
+#     x_pos_list = []
+#     y_pos_list = []
+#     iter = int(simulation_seconds/dt)
+#     for i in range(iter):
+#         action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+#         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
+#         action_unscaled = action_scaled.detach() * 0.05
+#         _, obs, _, done, _, info = env.step(action_unscaled.numpy())
 
 
 
-        actions_list.append(action_unscaled.numpy())
-        #the tendon lengths are the last 9 observations
-        # tendon_length_list.append(obs[-9:])
-        tendon_length_list.append(info["tendon_length"])
-        cap_posi_list.append(info["real_observation"][:18])
-        reward_forward_list.append(info["reward_forward"])
-        reward_ctrl_list.append(info["reward_ctrl"])
-        waypt_list.append(info["waypt"])
-        x_pos_list.append(info["x_position"])
-        y_pos_list.append(info["y_position"])
+#         actions_list.append(action_unscaled.numpy())
+#         #the tendon lengths are the last 9 observations
+#         # tendon_length_list.append(obs[-9:])
+#         tendon_length_list.append(info["tendon_length"])
+#         cap_posi_list.append(info["real_observation"][:18])
+#         reward_forward_list.append(info["reward_forward"])
+#         reward_ctrl_list.append(info["reward_ctrl"])
+#         waypt_list.append(info["waypt"])
+#         x_pos_list.append(info["x_position"])
+#         y_pos_list.append(info["y_position"])
 
-        if done:
-            extra_steps -= 1
+#         if done:
+#             extra_steps -= 1
 
-            if extra_steps < 0:
-                break
+#             if extra_steps < 0:
+#                 break
 
-    action_array = np.array(actions_list)
-    tendon_length_array = np.array(tendon_length_list)
-    cap_posi_array = np.array(cap_posi_list)
-    reward_forward_array = np.array(reward_forward_list)
-    reward_ctrl_array = np.array(reward_ctrl_list)
-    waypt_array = np.array(waypt_list)
-    x_pos_array = np.array(x_pos_list)
-    y_pos_array = np.array(y_pos_list)
-    np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
-    np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
-    np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
-    np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
-    np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
-    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
-    np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
-    np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
+#     action_array = np.array(actions_list)
+#     tendon_length_array = np.array(tendon_length_list)
+#     cap_posi_array = np.array(cap_posi_list)
+#     reward_forward_array = np.array(reward_forward_list)
+#     reward_ctrl_array = np.array(reward_ctrl_list)
+#     waypt_array = np.array(waypt_list)
+#     x_pos_array = np.array(x_pos_list)
+#     y_pos_array = np.array(y_pos_list)
+#     np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
+#     np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
+#     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
+#     np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
+#     np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
+#     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+#     np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
+#     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
 
 
 # Training loop
@@ -197,6 +225,10 @@ if __name__ == "__main__":
                         help="learning rate for SAC, default is 3e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
+    parser.add_argument('--batch_size', default=16, type=int,
+                        help="batch size for training, default is 16")
+    parser.add_argument('--device', default=torch.device("cuda" if torch.cuda.is_available() else "cpu"), type=int,
+                        help="number of workers for training, default is 1")
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -205,16 +237,14 @@ if __name__ == "__main__":
         terminate_when_unhealthy = True
 
     if args.train:
-        gymenv = tr_env_gym.tr_env_gym(render_mode="None",
+        gymenv = [tr_env_gym.tr_env_gym(render_mode="None",
                                     xml_file=os.path.join(os.getcwd(),args.env_xml),
                                     is_test = False,
                                     desired_action = args.desired_action,
                                     desired_direction = args.desired_direction,
-                                    terminate_when_unhealthy = terminate_when_unhealthy)
-        if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
-        else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
+                                    terminate_when_unhealthy = terminate_when_unhealthy)for _ in range(args.batch_size)]
+        
+        train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, device=args.device, batch_size=args.batch_size)
 
     if(args.test):
         if os.path.isfile(args.test):
