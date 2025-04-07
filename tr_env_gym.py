@@ -123,7 +123,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
         
-        self._oripoint = np.array([0.0, 0.0])
+        self._oripoint = None
         self._waypt_range = way_pts_range
         self._waypt_angle_range = way_pts_angle_range
         self._threshold_waypt = threshold_waypt
@@ -132,7 +132,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._waypt_reward_amplitude = waypt_reward_amplitude
         self._waypt_reward_stdev = waypt_reward_stdev
         self._yaw_reward_weight = yaw_reward_weight
-        self._waypt = np.array([])
+        self._waypt = None
 
         self._lin_vel_cmd = np.array([0.0, 0.0])
         self._ang_vel_cmd = 0.0
@@ -319,14 +319,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         elif self._desired_action == "straight":
             
-            psi_movement = np.arctan2(y_position_after-y_position_before, x_position_after-x_position_before)
+            # psi_movement = np.arctan2(y_position_after-y_position_before, x_position_after-x_position_before)
 
-            psi_diff = np.abs(psi_movement-self._reset_psi)
+            # psi_diff = np.abs(psi_movement-self._reset_psi)
 
-            forward_reward = self._desired_direction*\
-                                (np.sqrt((x_position_after-x_position_before)**2 + \
-                                        (y_position_after - y_position_before)**2) *\
-                                np.cos(psi_diff)/ self.dt) * 5.0
+            # forward_reward = self._desired_direction*\
+            #                     (np.sqrt((x_position_after-x_position_before)**2 + \
+            #                             (y_position_after - y_position_before)**2) *\
+            #                     np.cos(psi_diff)/ self.dt) * 5.0
+
+            before_potential = self._straight_potential(xy_position_before)
+            after_potential = self._straight_potential(xy_position_after)
+            forward_reward = after_potential - before_potential
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
@@ -581,6 +585,21 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
         return ditch_rew+waypt_rew
     
+    def _straight_potential(self, xy_position):
+        k_ALONG = 5.0 / self.dt
+        stdev_BIAS = 0.02
+        
+        odom_position = xy_position - self._oripoint
+        distance = np.linalg.norm(odom_position)
+        yaw_diff = np.arctan2(odom_position[1], odom_position[0]) - self._reset_psi
+        yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))
+
+        distance_along = distance * np.cos(yaw_diff)
+        distance_bias = np.abs(distance * np.sin(yaw_diff))
+
+        potential = self._desired_action * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
+        return potential
+    
     def _vel_track_rew(self, vel_cmd, vel_bwd):
         track_stdev = np.array([5.0, 7.0])
         track_amplitude = np.array([1.0, 0.5])
@@ -733,10 +752,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         right_COM_before = (pos_r01_right_end+pos_r23_right_end+pos_r45_right_end)/3
         orientation_vector_before = left_COM_before - right_COM_before
         self._reset_psi = np.arctan2(-orientation_vector_before[0], orientation_vector_before[1])
+        self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0])/2, (left_COM_before[1]+right_COM_before[1])/2])
         
 
         if self._desired_action == "tracking":
-            self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0])/2, (left_COM_before[1]+right_COM_before[1])/2])
             min_waypt_range, max_waypt_range = self._waypt_range
             min_waypt_angle, max_waypt_angle = self._waypt_angle_range
             waypt_length = np.random.uniform(min_waypt_range, max_waypt_range)
@@ -751,7 +770,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             #     self._waypt = np.array([0, 0]) # for test3
         
         elif self._desired_action == "aiming":
-            self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0]/2), (left_COM_before[1]+right_COM_before[1])/2])
             min_waypt_range, max_waypt_range = self._waypt_range
             min_waypt_angle = -np.pi
             max_waypt_angle = np.pi
