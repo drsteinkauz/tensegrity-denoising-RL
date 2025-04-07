@@ -22,7 +22,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
     step_num = 0
     eps_num = 0
 
-    writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
+    writer = None
 
     while True:
         # state, observation = env.reset()[0]
@@ -31,6 +31,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         episode_len = 0
         episode_forward_reward = 0
         episode_ctrl_reward = 0
+
+        writer = SummaryWriter(log_dir)
 
         while True:
             if step_num < agent.warmup_steps:
@@ -59,8 +61,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
                 writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
                 writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
                 writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
-                writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
-                writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
+                # writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
+                # writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
@@ -72,6 +74,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx):
         writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
         writer.add_scalar("ep/ep_len", episode_len, eps_num)
         writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
+        writer.flush()
+        writer.close()
 
         print("--------------------------------")
         print(f"Episode {eps_num}")
