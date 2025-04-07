@@ -53,11 +53,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         # damping_noise_range_cross = (2.5, 40),
         # stiffness_noise_range_side = (5, 20),
         # stiffness_noise_range_cross = (75, 300),
-        friction_noise_range = (1, 1),
-        damping_noise_range_side = (1, 1),
-        damping_noise_range_cross = (10, 10),
-        stiffness_noise_range_side = (10, 10),
-        stiffness_noise_range_cross = (150, 150),
+        friction_noise_range = (0.25, 2),
+        damping_noise_range_side = (0.25, 4),
+        damping_noise_range_cross = (2.5, 40),
+        stiffness_noise_range_side = (2.5, 40),
+        stiffness_noise_range_cross = (75, 300),
         contact_with_self_penalty = 0.0,
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
@@ -179,7 +179,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if desired_action == "tracking" or desired_action == "aiming" or desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
         
-        self.state_shape = obs_shape
+        self.state_shape = obs_shape + 5 # 5 for friction coefficient, damping of side and cross, stiffness of side and cross
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -549,6 +549,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             observation = state_with_noise
         else:
             observation = state
+
+        state = np.concatenate((state, np.array([
+            self.model.geom_friction[0, 0],  # friction coefficient of the first geom
+            self.model.tendon_damping[6],    # damping of side tendons
+            self.model.tendon_damping[12],   # damping of cross tendons
+            self.model.tendon_stiffness[6],  # stiffness of side tendons
+            self.model.tendon_stiffness[12]  # stiffness of cross tendons
+        ])))
 
         return state, observation
 
