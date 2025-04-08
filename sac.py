@@ -64,6 +64,10 @@ class PolicyNetwork(nn.Module):
     def sample(self, observation):
         epsilon_tanh = 1e-6
         mean, std = self.forward(observation)
+        if torch.isnan(mean).any():
+                    raise ValueError("Mean observation contains NaN values")
+        if torch.isnan(std).any():
+                    raise ValueError("Std observation contains NaN values")
         dist = torch.distributions.Normal(mean, std)
         action_unbounded = dist.rsample()
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
