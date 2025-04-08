@@ -22,7 +22,7 @@ def batched_step(env, action,batch_size,device):
     info_env = list(info_env)
     return next_state, next_observation, reward, done, info_env
 
-def train(env, log_dir, model_dir, lr, device, batch_size, feature_type=0):
+def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, feature_type=0):
     feature_list = [41,105,82]
     state_dim = env[0].state_shape+5 # 5 is the number for damping and friction
     observation_dim = feature_list[feature_type]
@@ -35,7 +35,7 @@ def train(env, log_dir, model_dir, lr, device, batch_size, feature_type=0):
                                         num_decoder_layers=7, nhead=8, dropout=0.4, batch_size=batch_size, 
                                         dim_feedforward=512,device=device)
 
-    agent.lr = lr
+    agent.lr = lr_SAC
     
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
@@ -54,7 +54,7 @@ def train(env, log_dir, model_dir, lr, device, batch_size, feature_type=0):
         episode_len = 0
         episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
         episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
-        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=1e-4)
+        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=lr_Transformer)
         feature = otf.get_feature(type_index=feature_type)
         
         
@@ -68,7 +68,7 @@ def train(env, log_dir, model_dir, lr, device, batch_size, feature_type=0):
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
             next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
-            info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=1e-4)
+            info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
             next_feature = otf.get_feature(type_index=0)
             #print("feature",feature.shape, next_feature.shape)
             agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument('--terminate_when_unhealthy', default="yes", type=str,choices=["yes", "no"],
                          help="Determines if the training is reset when the tensegrity stops moving or not, default is True.\
                             Best results are to set yes when training to move straight and set no when training to turn")
-    parser.add_argument('--contact_with_self_penatly', default= 0.0, type=float,
+    parser.add_argument('--contact_with_self_penalty', default= 0.0, type=float,
                         help="The penalty multiplied by the total contact between bars, which is then subtracted from the reward.\
                         By default this is 0.0, meaning there is no penalty for contact.")
     parser.add_argument('--log_dir', default="logs", type=str,
@@ -223,12 +223,14 @@ if __name__ == "__main__":
                          help="time in seconds to run simulation when testing, default is 30 seconds")
     parser.add_argument('--lr_SAC', default=3e-4, type=float,
                         help="learning rate for SAC, default is 3e-4")
+    parser.add_argument('--lr_Transformer', default=1e-3, type=float,
+                        help="learning rate for Transformer, default is 1e-3")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
     parser.add_argument('--batch_size', default=16, type=int,
                         help="batch size for training, default is 16")
     parser.add_argument('--device', default=torch.device("cuda" if torch.cuda.is_available() else "cpu"), type=int,
-                        help="number of workers for training, default is 1")
+                        help="device working on, default is torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")")
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -244,7 +246,7 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)for _ in range(args.batch_size)]
         
-        train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, device=args.device, batch_size=args.batch_size)
+        train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size)
 
     if(args.test):
         if os.path.isfile(args.test):
