@@ -7,11 +7,15 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
 
-def train(env, log_dir, model_dir, lr, gpu_idx):
+def train(env, log_dir, model_dir, lr, gpu_idx=None):
+    if gpu_idx is not None:
+        device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim, observation_dim, action_dim, 32)
+    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=32, device=device)
 
     agent.lr = lr
     
