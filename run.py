@@ -64,6 +64,8 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
                 action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
             else:
                 #action_scaled = [agent.select_action(feature[idx]) for idx in range(batch_size)]
+                if torch.isnan(observation).any():
+                    raise ValueError("Input observation contains NaN values")
                 action_scaled = agent.select_action(feature)
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05

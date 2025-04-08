@@ -6,7 +6,7 @@ from gym.spaces import Box
 import os
 from scipy.spatial.transform import Rotation
 from collections import deque
-#import mujoco
+import mujoco
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
