@@ -597,7 +597,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         distance_along = distance * np.cos(yaw_diff)
         distance_bias = np.abs(distance * np.sin(yaw_diff))
 
-        potential = self._desired_action * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
+        potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
         return potential
     
     def _vel_track_rew(self, vel_cmd, vel_bwd):
