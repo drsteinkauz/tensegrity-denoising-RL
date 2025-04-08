@@ -120,12 +120,9 @@ class SACAgent:
         self._target_entropy = -action_dim
         
         # Networks
-        # self.actor = PolicyNetwork(state_dim, action_dim).to(self.device)
-        # self.critic = QNetwork(state_dim, action_dim).to(self.device)
-        # self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.actor = torch.nn.DataParallel(PolicyNetwork(observation_dim, action_dim)).to(self.device)
-        self.critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
-        self.target_critic = torch.nn.DataParallel(QNetwork(state_dim, action_dim)).to(self.device)
+        self.actor = PolicyNetwork(observation_dim, action_dim).to(self.device)
+        self.critic = QNetwork(state_dim, action_dim).to(self.device)
+        self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -141,7 +138,7 @@ class SACAgent:
     def select_action(self, observation):
         observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
-            action, _, _ = self.actor.module.sample(observation)
+            action, _, _ = self.actor.sample(observation)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
@@ -160,7 +157,7 @@ class SACAgent:
             next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
             done_batch = torch.FloatTensor(done_batch).to(self.device)
 
-        sampled_action, action_log_prob, std = self.actor.module.sample(observation_batch)
+        sampled_action, action_log_prob, std = self.actor.sample(observation_batch)
         
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
         # self.alpha = 0.0001
@@ -174,7 +171,7 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            sampled_action_next, action_log_prob_next, _ = self.actor.module.sample(next_observation_batch)
+            sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_observation_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
