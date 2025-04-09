@@ -1,4 +1,4 @@
-import sac
+import gae_sac
 import tr_env_gym
 
 import os
@@ -15,7 +15,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=32, device=device)
+    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=32, device=device)
 
     agent.lr = lr
     
@@ -96,7 +96,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
