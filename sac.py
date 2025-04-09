@@ -121,14 +121,29 @@ class GRUAutoEncoder(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity):
+    def __init__(self, capacity, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         self.buffer = deque(maxlen=capacity)
+        self.device = device
     
     def push(self, state, observation, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done):
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            observation = torch.FloatTensor(observation).to(self.device)
+            obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device)
+            action = torch.FloatTensor(action).to(self.device)
+            reward = torch.FloatTensor([reward]).to(self.device)
+            next_state = torch.FloatTensor(next_state).to(self.device)
+            next_observation = torch.FloatTensor(next_observation).to(self.device)
+            next_obs_act_seq = torch.FloatTensor(next_obs_act_seq).to(self.device)
+            done = torch.FloatTensor([done]).to(self.device)
         self.buffer.append((state, observation, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done))
     
     def sample(self, batch_size):
-        return random.sample(self.buffer, batch_size)
+        # batch = random.sample(self.buffer, batch_size)
+        indices = torch.randint(0, len(self.buffer), (batch_size,), device=self.device)
+        batch = [self.buffer[idx] for idx in indices]
+        batch = [torch.stack([x[i] for x in batch]).to(self.device) for i in range(len(batch[0]))]
+        return batch
     
     def size(self):
         return len(self.buffer)
@@ -171,7 +186,7 @@ class SACAgent:
         self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GAE)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(self.buffer_size)
+        self.replay_buffer = ReplayBuffer(self.buffer_size, self.device)
     
     def select_action(self, obs_act_seq):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
@@ -184,19 +199,21 @@ class SACAgent:
         if self.replay_buffer.size() < self.batch_size:
             return
         
-        batch = self.replay_buffer.sample(self.batch_size)
-        state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = zip(*batch)
+        # batch = self.replay_buffer.sample(self.batch_size)
+        # state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = zip(*batch)
+
+        # with torch.no_grad():
+        #     state_batch = torch.FloatTensor(state_batch).to(self.device)
+        #     observation_batch = torch.FloatTensor(observation_batch).to(self.device)
+        #     obs_act_seq_batch = torch.FloatTensor(obs_act_seq_batch).to(self.device)
+        #     action_batch = torch.FloatTensor(action_batch).to(self.device)
+        #     reward_batch = torch.FloatTensor(reward_batch).to(self.device)
+        #     next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
+        #     next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
+        #     next_obs_act_seq_batch = torch.FloatTensor(next_obs_act_seq_batch).to(self.device)
+        #     done_batch = torch.FloatTensor(done_batch).to(self.device)
         
-        with torch.no_grad():
-            state_batch = torch.FloatTensor(state_batch).to(self.device)
-            observation_batch = torch.FloatTensor(observation_batch).to(self.device)
-            obs_act_seq_batch = torch.FloatTensor(obs_act_seq_batch).to(self.device)
-            action_batch = torch.FloatTensor(action_batch).to(self.device)
-            reward_batch = torch.FloatTensor(reward_batch).to(self.device)
-            next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
-            next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
-            next_obs_act_seq_batch = torch.FloatTensor(next_obs_act_seq_batch).to(self.device)
-            done_batch = torch.FloatTensor(done_batch).to(self.device)
+        state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
         feature_batch = self.gruautoencoder.encode(obs_act_seq_batch)
         sampled_action, action_log_prob, std = self.actor.sample(feature_batch.detach())
