@@ -1,3 +1,6 @@
 __pycache__/
 *.DS_Store
 *.npy
+events.*
+*.pth
+!actors/*.pth
