@@ -6,8 +6,9 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
+import time
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None):
+def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -26,7 +27,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
     step_num = 0
     eps_num = 0
 
-    writer = None
+    if tb_step_recorder == "True":
+        writer = None
+    else:
+        writer = SummaryWriter(log_dir)
 
     while True:
         # state, observation = env.reset()[0]
@@ -36,7 +40,15 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
         episode_forward_reward = 0
         episode_ctrl_reward = 0
 
-        writer = SummaryWriter(log_dir)
+        if tb_step_recorder == "True":
+            writer = SummaryWriter(log_dir)
+        else:
+            actor_losses = []
+            critic_losses = []
+            ent_coef_losses = []
+            ent_coefs = []
+
+        start_time = time.time()
 
         while True:
             if step_num < agent.warmup_steps:
@@ -61,12 +73,18 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
             episode_len += 1
 
             if info_agent is not None:
-                writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
-                writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
-                writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
-                writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
-                # writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
-                # writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
+                if tb_step_recorder == "True":
+                    writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
+                    writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
+                    writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
+                    writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
+                    # writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
+                    # writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
+                else:
+                    actor_losses.append(info_agent["actor_loss"])
+                    critic_losses.append(info_agent["critic_loss"])
+                    ent_coef_losses.append(info_agent["ent_coef_loss"])
+                    ent_coefs.append(info_agent["ent_coef"])
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
@@ -74,13 +92,23 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
 
             if done or episode_len >= 5000:
                 break
+
+        end_time = time.time()
+        train_speed = episode_len / (end_time - start_time)
         
         eps_num += 1
         writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
         writer.add_scalar("ep/ep_len", episode_len, eps_num)
         writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
+        writer.add_scalar("ep/train_speed", train_speed, step_num)
+        if tb_step_recorder == "False":
+            writer.add_scalar("loss/actor_loss", np.array(actor_losses).mean(), step_num)
+            writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
+            writer.add_scalar("loss/ent_coef_loss", np.array(ent_coef_losses).mean(), step_num)
+            writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
         writer.flush()
-        writer.close()
+        if tb_step_recorder == "True":
+            writer.close()
 
         print("--------------------------------")
         print(f"Episode {eps_num}")
@@ -90,6 +118,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None):
         print(f"ep_len: {episode_len}")
         print(f"step_num: {step_num}")
         print(f"learning_rate: {agent.lr}")
+        print(f"train_speed: {train_speed}")
         print("--------------------------------")
     
     writer.close()
