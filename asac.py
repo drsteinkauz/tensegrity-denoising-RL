@@ -87,30 +87,40 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
-        self.buffer = deque(maxlen=capacity)
+    def __init__(self, capacity, state_dim, obs_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+        self.capacity = capacity
         self.device = device
+        self.ptr = 0
+        self.size = 0
+
+        self.states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
+        self.observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
+        self.next_states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
+        self.next_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
     
     def push(self, state, observation, action, reward, next_state, next_observation, done):
+        i = self.ptr
+
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
-            observation = torch.FloatTensor(observation).to(self.device)
-            action = torch.FloatTensor(action).to(self.device)
-            reward = torch.FloatTensor([reward]).to(self.device)
-            next_state = torch.FloatTensor(next_state).to(self.device)
-            next_observation = torch.FloatTensor(next_observation).to(self.device)
-            done = torch.FloatTensor([done]).to(self.device)
-        self.buffer.append((state, observation, action, reward, next_state, next_observation, done))
+            self.states[i] = torch.tensor(state, dtype=torch.float32, device=self.device)
+            self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
+            self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
+            self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+            self.next_states[i] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+            self.next_observations[i] = torch.tensor(next_observation, dtype=torch.float32, device=self.device)
+            self.dones[i] = torch.tensor([done], dtype=torch.float32, device=self.device)
+
+        self.ptr = (self.ptr + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
     
     def sample(self, batch_size):
         # batch = random.sample(self.buffer, batch_size)
-        indices = torch.randint(0, len(self.buffer), (batch_size,), device=self.device)
-        batch = [self.buffer[idx] for idx in indices]
-        batch = [torch.stack([x[i] for x in batch]).to(self.device) for i in range(len(batch[0]))]
+        indices = torch.randint(0, self.size, (batch_size,), device=self.device)
+        batch = (self.states[indices], self.observations[indices], self.actions[indices], self.rewards[indices], self.next_states[indices], self.next_observations[indices], self.dones[indices])
         return batch
-    
-    def size(self):
-        return len(self.buffer)
 
 
 # SAC Agent class
@@ -146,7 +156,7 @@ class SACAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(self.buffer_size, self.device)
+        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
     
     def select_action(self, observation):
         observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
@@ -155,7 +165,7 @@ class SACAgent:
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
-        if self.replay_buffer.size() < self.batch_size:
+        if self.replay_buffer.size < self.batch_size:
             return
         
         # batch = self.replay_buffer.sample(self.batch_size)
