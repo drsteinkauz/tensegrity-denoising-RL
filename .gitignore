@@ -4,3 +4,4 @@ __pycache__/
 events.*
 *.pth
 !actors/*.pth
+saved_data/*.ipynb
