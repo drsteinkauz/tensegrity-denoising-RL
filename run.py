@@ -47,6 +47,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
             critic_losses = []
             ent_coef_losses = []
             ent_coefs = []
+            predict_losses = []
+            predict_errors = []
 
         start_time = time.time()
 
@@ -85,6 +87,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                     critic_losses.append(info_agent["critic_loss"])
                     ent_coef_losses.append(info_agent["ent_coef_loss"])
                     ent_coefs.append(info_agent["ent_coef"])
+                    predict_losses.append(info_agent["predict_loss"])
+                    predict_errors.append(info_agent["predict_error"])
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
@@ -106,6 +110,8 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
             writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef_loss", np.array(ent_coef_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
+            writer.add_scalar("loss/predict_loss", np.array(predict_losses).mean(), step_num)
+            writer.add_scalar("loss/predict_error", np.array(predict_errors).mean(), step_num)
         writer.flush()
         if tb_step_recorder == "True":
             writer.close()

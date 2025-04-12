@@ -242,15 +242,16 @@ class SACAgent:
 
         # GRUAutoEncoder update
         predicted_state = self.gruautoencoder.decode(feature_batch)
-        predict_loss = 0.5*F.mse_loss(predicted_state, state_batch) + self.lambda_for_GAE * torch.norm(feature_batch, p=1, dim=1).mean()
+        predict_error = F.mse_loss(predicted_state, state_batch)
+        predict_loss = 0.5*predict_error + self.lambda_for_GAE * torch.norm(feature_batch, p=1, dim=1).mean()
 
         self.gruautoencoder_optimizer.zero_grad()
         predict_loss.backward()
         self.gruautoencoder_optimizer.step()
         
+        # entropy coefficient update
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
 
-        # entropy coefficient update
         ent_coef_loss = -(self.log_ent_coef * (action_log_prob + self._target_entropy).detach()).mean()
 
         self.ent_coef_optimizer.zero_grad()
@@ -292,6 +293,8 @@ class SACAgent:
             'actor_loss': actor_loss.item(),
             'ent_coef_loss': ent_coef_loss.item(),
             'ent_coef': self.alpha,
+            'predict_loss': predict_loss.item(),
+            'predict_error': predict_error.item(),
             'log_pi': action_log_prob.mean().item(),
             'pi_std': std.mean().item(),
         }
