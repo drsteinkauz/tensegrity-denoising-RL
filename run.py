@@ -129,15 +129,17 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     
     writer.close()
 
-def test(env, path_to_model, saved_data_dir, simulation_seconds):
+def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
-    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    actor.load_state_dict(state_dict)
+    actor = gae_sac.PolicyNetwork(32, env.action_space.shape[0]).to(device)
+    actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
+    actor.load_state_dict(actor_state_dict)
+    gae = gae_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
+    gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
+    gae.load_state_dict(gae_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs = env.reset()[0]
+    _, obs, obs_act_seq = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -152,14 +154,17 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     y_pos_list = []
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+        feature = gae.encode(torch.from_numpy(np.array([obs_act_seq])).float())
+        action_scaled, _ = actor.predict(feature)
+        action_scaled = action_scaled.flatten().detach().cpu().numpy()
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
-        action_unscaled = action_scaled.detach() * 0.05
-        _, obs, _, done, _, info = env.step(action_unscaled.numpy())
+        action_unscaled = action_scaled * 0.05
+        _, obs, _, done, _, info = env.step(action_unscaled)
 
+        obs_act = np.concatenate((obs, action_scaled))
+        obs_act_seq = np.concatenate((obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
 
-
-        actions_list.append(action_unscaled.numpy())
+        actions_list.append(action_unscaled)
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
@@ -201,7 +206,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('--train', action='store_true')
-    parser.add_argument('--test', metavar='path_to_model')
+    parser.add_argument('--test', metavar='path_to_model', nargs=2)
     parser.add_argument('--test3', metavar='path_to_model', nargs=3)
     parser.add_argument('--tracking_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
@@ -253,12 +258,12 @@ if __name__ == "__main__":
             train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
 
     if(args.test):
-        if os.path.isfile(args.test):
+        if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
             gymenv = tr_env_gym.tr_env_gym(render_mode='human',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_actor=args.test[0], path_to_gae=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
