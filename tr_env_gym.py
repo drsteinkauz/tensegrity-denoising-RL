@@ -336,7 +336,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
             if self._terminate_when_unhealthy:
-                healthy_reward = self.healthy_reward
+                # healthy_reward = self.healthy_reward
+                healthy_reward = 0
             else:
                 healthy_reward = 0
             
@@ -586,7 +587,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     
     def _straight_potential(self, xy_position):
         k_ALONG = 5.0 / self.dt
-        stdev_BIAS = 0.02
+        stdev_BIAS = 0.08
 
         odom_position = xy_position - self._oripoint
         distance = np.linalg.norm(odom_position)
