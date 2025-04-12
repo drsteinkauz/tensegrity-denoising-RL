@@ -5,6 +5,10 @@ reward_forward_data = np.load('reward_forward_data.npy')
 reward_ctrl_data = np.load('reward_ctrl_data.npy')
 action_data = np.load('action_data.npy')
 tendon_data = np.load('tendon_data.npy')
+oript_data = np.load('oript_data.npy')
+iniyaw_data = np.load('iniyaw_data.npy')
+x_pos_data = np.load('x_pos_data.npy')
+y_pos_data = np.load('y_pos_data.npy')
 
 action_subdata = action_data
 plt.figure(figsize=(12, 8))
@@ -61,18 +65,30 @@ plt.ylabel('active tendon subdata 5')
 plt.grid()
 
 plt.figure(figsize=(12, 8))
+vector_length = 1
+iniyaw = iniyaw_data[0]
+vec_endpt = oript_data + vector_length * np.array([np.cos(iniyaw), np.sin(iniyaw)])
+plt.plot([oript_data[0], vec_endpt[0]], [oript_data[1], vec_endpt[1]], 'r-', label='forward direction')
+plt.scatter([oript_data[0]], [oript_data[1]], color='blue', label='original point')
+plt.plot(x_pos_data, y_pos_data, marker='.', linestyle='-')
+plt.axis('equal')
+plt.title('x-y position')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(12, 8))
 reward_forward_subdata = reward_forward_data
 plt.subplot(211)
 plt.plot(reward_forward_subdata, marker='.', linestyle='-')
 plt.ylabel('reward forward subdata')
 plt.grid()
-
 reward_ctrl_subdata = reward_ctrl_data
 plt.subplot(212)
 plt.plot(reward_ctrl_subdata, marker='.', linestyle='-')
 plt.ylabel('reward ctrl subdata')
 plt.grid()
 plt.show()
-
 print('sum of reward forward: ', np.sum(reward_forward_subdata))
 print('sum of reward ctrl: ', np.sum(reward_ctrl_subdata))
