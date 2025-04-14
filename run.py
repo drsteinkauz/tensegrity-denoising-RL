@@ -1,4 +1,4 @@
-import gae_sac
+import ge_sac
 import tr_env_gym
 
 import os
@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=32, device=device)
+    agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_range=env.inheparam_range, device=device)
 
     agent.lr = lr
     
@@ -131,10 +131,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
 def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gae_sac.PolicyNetwork(32, env.action_space.shape[0]).to(device)
+    actor = ge_sac.PolicyNetwork(32, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    gae = gae_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
+    gae = ge_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
     gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
     gae.load_state_dict(gae_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)

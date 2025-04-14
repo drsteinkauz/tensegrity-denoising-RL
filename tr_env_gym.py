@@ -177,8 +177,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if desired_action == "tracking" or desired_action == "aiming" or desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
         
+        self.inheparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
+        self.inheparam_range = np.array([[self._friction_noise_range[0], self._friction_noise_range[1]],
+                                         [self._damping_noise_range_cross[0], self._damping_noise_range_cross[1]],
+                                         [self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1]]])
         if self._use_inherent_params_dr:
-            self.state_shape = obs_shape + 5 # 5 for friction coefficient, damping of side and cross, stiffness of side and cross
+            self.state_shape = obs_shape + self.inheparam_shape
         else:
             self.state_shape = obs_shape
 
@@ -561,9 +565,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         
         if self._use_inherent_params_dr:
             state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
-                                    self.model.tendon_damping[6],  # damping of side tendon
                                     self.model.tendon_damping[12],  # damping of cross tendon
-                                    self.model.tendon_stiffness[6],  # stiffness of side tendon
                                     self.model.tendon_stiffness[12]])))  # stiffness of cross tendon
 
         return state, observation
@@ -632,9 +634,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         stiffness_coeff = np.array([np.random.uniform(self._stiffness_noise_range_side[0], self._stiffness_noise_range_side[1]), np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])])
 
         self.model.geom_friction[:, 0] = friction_coeff
-        self.model.tendon_damping[6:12] = damping_coeff[0]
         self.model.tendon_damping[12:15] = damping_coeff[1]
-        self.model.tendon_stiffness[6:12] = stiffness_coeff[0]
         self.model.tendon_stiffness[12:15] = stiffness_coeff[1]
         return
 
