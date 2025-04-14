@@ -135,6 +135,8 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
         for i, length in enumerate(episode_len):
             writer.add_scalar("ep/ep_len", length, eps_num)
+        writer.add_scalar("ep/ep_f_rew", episode_forward_reward.mean().item(), eps_num)
+        writer.add_scalar("ep/ep_c_rew", episode_ctrl_reward.mean().item(), eps_num)
         writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
         
         timer.clip_group()
