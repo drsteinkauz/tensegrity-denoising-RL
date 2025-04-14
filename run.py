@@ -56,7 +56,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(obs_act_seq)
+                action_scaled = agent.select_action(obs_act_seq, observation)
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
             next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)

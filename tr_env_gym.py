@@ -30,7 +30,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_contact_forces=False,
         use_tendon_length=False,
         use_cap_velocity=True,
-        use_obs_noise=True,
+        use_obs_noise=False,
         use_inherent_params_dr=True,
         terminate_when_unhealthy=True,
         is_test = False,
@@ -188,6 +188,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         if use_cap_velocity:
             self.state_shape += 18
+            obs_shape += 18
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -531,8 +532,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
             state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
                                         vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
-            # state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
-            #                             vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
+            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+                                        vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
             
         if self._use_tendon_length:
             state = np.concatenate((state, tendon_lengths))

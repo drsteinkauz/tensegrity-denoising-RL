@@ -179,8 +179,8 @@ class SACAgent:
 
         self.inheparam_dim = inheparam_dim
         with torch.no_grad():
-            self.inheparam_mean = torch.tensor((inheparam_range[0] + inheparam_range[1]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
-            self.inheparam_std = torch.tensor((inheparam_range[1] - inheparam_range[0]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
+            self.inheparam_mean = torch.tensor((inheparam_range[:,0] + inheparam_range[:,1]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
+            self.inheparam_std = torch.tensor((inheparam_range[:,1] - inheparam_range[:,0]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
             # shape: (1, inheparam_dim)
 
         # self.alpha = 1          # Entropy coefficient # 0.2
