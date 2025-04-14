@@ -7,6 +7,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
+from timer import Timer
 
 def batched_step(env, action,batch_size,device):
     """
@@ -31,23 +32,24 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
     # print("observation_dim", observation_dim)
     # print("action_dim", action_dim)
     agent = sac.SACAgent(state_dim, observation_dim, action_dim, device=device, batch_size=batch_size)
-    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=512, num_encoder_layers=7, 
+    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=128, num_encoder_layers=7, 
                                         num_decoder_layers=7, nhead=8, dropout=0.4, batch_size=batch_size, 
-                                        dim_feedforward=512,device=device)
+                                        dim_feedforward=128,device=device)
 
     agent.lr = lr_SAC
     
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    TIMESTEPS = 25000
+    TIMESTEPS = 2500
     step_num = 0
     eps_num = 0
 
     writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
-
+    timer = Timer()
     while True:
         state, observation = zip(*(env[i].reset()[0] for i in range(batch_size)))
+        #print(observation)
         state = torch.from_numpy(np.array(state)).float()
         observation = torch.from_numpy(np.array(observation)).float()
         episode_reward = np.array([0.0 for _ in range(batch_size)])
@@ -60,18 +62,23 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         
         while True:
             #print(observation.shape)
-            if step_num < agent.warmup_steps:
+            if episode_len < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
             else:
                 #action_scaled = [agent.select_action(feature[idx]) for idx in range(batch_size)]
-                if torch.isnan(observation).any():
-                    raise ValueError("Input observation contains NaN values")
                 action_scaled = agent.select_action(feature)
             # action_unscaled = action_scaled * 0.3 - 0.15
             action_unscaled = action_scaled * 0.05
             next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
+            #print("next_observation",next_observation.shape,"next_state[...,:18]",next_state[...,:18].shape)
+            if done.any() or torch.isnan(next_observation).any() or episode_len >= 5000:
+                print("isnan(next_observation).any()")
+                break
             info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
             next_feature = otf.get_feature(type_index=0)
+            if torch.isnan(next_feature).any():
+                print("isnan(next_feature).any()")
+                break
             #print("feature",feature.shape, next_feature.shape)
             agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
             info_agent = agent.update()
@@ -97,15 +104,14 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done.any() or episode_len >= 5000:
-                break
+            
             
             eps_num += 1
             writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
             writer.add_scalar("ep/ep_len", episode_len, eps_num)
             writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
             
-            if eps_num % 50 == 0:
+            if eps_num % 100 == 0:
                 print("--------------------------------")
                 print(f"Episode {eps_num}")
                 print(f"ep_rew: {episode_reward}")
@@ -114,6 +120,8 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
                 print(f"ep_len: {episode_len}")
                 print(f"step_num: {step_num}")
                 print(f"learning_rate: {agent.lr}")
+                time100 = timer.print_time()
+                print(f"{time100:.3g}s for 100 steps; {time100*2.5/9:.3g}h for 100k steps")
                 print("--------------------------------")
     
     writer.close()
@@ -225,12 +233,12 @@ if __name__ == "__main__":
                          help="time in seconds to run simulation when testing, default is 30 seconds")
     parser.add_argument('--lr_SAC', default=3e-4, type=float,
                         help="learning rate for SAC, default is 3e-4")
-    parser.add_argument('--lr_Transformer', default=1e-3, type=float,
-                        help="learning rate for Transformer, default is 1e-3")
+    parser.add_argument('--lr_Transformer', default=5e-5, type=float,
+                        help="learning rate for Transformer, default is 5e-5")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
-    parser.add_argument('--batch_size', default=16, type=int,
-                        help="batch size for training, default is 16")
+    parser.add_argument('--batch_size', default=32, type=int,
+                        help="batch size for training, default is 32")
     parser.add_argument('--device', default=torch.device("cuda" if torch.cuda.is_available() else "cpu"), type=int,
                         help="device working on, default is torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")")
     args = parser.parse_args()

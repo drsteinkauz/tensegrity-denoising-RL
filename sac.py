@@ -97,7 +97,19 @@ class ReplayBuffer:
         self.buffer = [deque(maxlen=capacity) for idx in range(batch_size)]
     
     def push(self, state, observation, action, reward, next_state, next_observation, done):
+        """
+        > print(state.dtype,observation.dtype,action.dtype,reward.dtype,next_state.dtype,next_observation.dtype,done.dtype)
+        torch.float32 torch.float32 float64 float32 torch.float32 torch.float32 bool
+        """
         for i in range(self.batch_size):
+            #print(state.dtype,observation.dtype,action.dtype,reward.dtype,next_state.dtype,next_observation.dtype,done.dtype)
+            if (torch.isnan(state[i]).any() or
+                torch.isnan(observation[i]).any() or
+                np.isnan(action[i]).any() or
+                np.isnan(reward[i]).any() or
+                torch.isnan(next_state[i]).any() or
+                torch.isnan(next_observation[i]).any()):
+                continue
             self.buffer[i].append((
                     state[i],
                     observation[i],
@@ -155,6 +167,7 @@ class SACAgent:
         self.replay_buffer = ReplayBuffer(self.buffer_size, batch_size)
     
     def select_action(self, observation):
+        #print(observation)
         observation = torch.stack([tensor.to(self.device) for tensor in observation])
         #observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
