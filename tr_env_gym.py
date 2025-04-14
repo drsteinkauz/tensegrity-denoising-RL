@@ -30,7 +30,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_contact_forces=False,
         use_tendon_length=False,
         use_cap_velocity=True,
-        use_obs_noise=True,
+        use_obs_noise=False,
         use_inherent_params_dr=True,
         terminate_when_unhealthy=True,
         is_test = False,
@@ -61,13 +61,13 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         contact_with_self_penalty = 0.0,
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
-        way_pts_range = (2.5, 3.5),
+        way_pts_range = (1.0, 1.0),
         way_pts_angle_range = (-np.pi/6, np.pi/6),
         threshold_waypt = 0.05,
-        ditch_reward_max=300,
-        ditch_reward_stdev=0.15,
+        ditch_reward_max=200,
+        ditch_reward_stdev=0.08,
         waypt_reward_amplitude=100,
-        waypt_reward_stdev=0.10,
+        waypt_reward_stdev=0.03,
         yaw_reward_weight=1,
         **kwargs
     ):
@@ -176,10 +176,17 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 84
         if use_cap_velocity:
             obs_shape += 18
-        if desired_action == "tracking" or desired_action == "aiming" or desired_action == "vel_track":
+        if desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
+        elif desired_action == "tracking":
+            obs_shape += 2 # tracking vector x, y
+        elif desired_action == "straight":
+            obs_shape += 3 # del_x, del_y, psi
         
-        self.state_shape = obs_shape + 5 # 5 for friction coefficient, damping of side and cross, stiffness of side and cross
+        if self._use_inherent_params_dr:
+            self.state_shape = obs_shape + 3 # 3 for friction coefficient, damping of cross, stiffness of cross
+        else:
+            self.state_shape = obs_shape
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -221,7 +228,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     @property
     def is_healthy(self):
         state = self.state_vector()
-        if self._desired_action == "turn" or self._desired_action == "aiming":
+        if self._desired_action == "turn":
             bar_speeds = np.abs(state[21:])
             min_velocity = 0.1
             is_healthy = np.isfinite(state).all() and (np.any(bar_speeds > min_velocity) )    
@@ -341,28 +348,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                 healthy_reward = 0
             
             terminated = self.terminated
-
-        elif self._desired_action == "aiming":
-            target_direction = self._waypt - xy_position_before
-            target_direction = target_direction / np.linalg.norm(target_direction)
-            target_psi = np.arctan2(target_direction[1], target_direction[0])
-            new_psi_rbt_tgt = self._angle_normalize(target_psi - psi_after)
-            self._heading_buffer.append(new_psi_rbt_tgt)
-            if len(self._heading_buffer) > self._reward_delay_steps:
-                old_psi_rbt_tgt = self._heading_buffer.popleft()
-                delta_psi = -(np.abs(new_psi_rbt_tgt) - np.abs(old_psi_rbt_tgt)) / (self.dt*self._reward_delay_steps)
-                forward_reward = delta_psi * self._yaw_reward_weight
-            else:
-                delta_psi = 0
-                forward_reward = 0
-            
-            costs = ctrl_cost = self.control_cost(action, tendon_length_6)
-            
-            healthy_reward = 0
-            
-            terminated = self.terminated  
-            if self._step_num > 1000:
-                terminated = True
         
         elif self._desired_action == "tracking":
             # ditch tracking reward
@@ -530,7 +515,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             state = np.concatenate((state, tendon_lengths))
             state_with_noise = np.concatenate((state_with_noise, tendon_lengths_with_noise))
 
-        if self._desired_action == "tracking" or self._desired_action == "aiming":
+        if self._desired_action == "tracking":
             tracking_vec = self._waypt - pos_center[:2]
             tgt_drct = tracking_vec / np.linalg.norm(tracking_vec)
             pos_center_noise_del = (pos_rel_s0_with_noise + pos_rel_s1_with_noise + pos_rel_s2_with_noise + pos_rel_s3_with_noise + pos_rel_s4_with_noise + pos_rel_s5_with_noise)/6
@@ -541,27 +526,39 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tgt_yaw_with_noise = np.array([np.arctan2(tgt_drct_with_noise[1], tgt_drct_with_noise[0])])
 
             state = np.concatenate((state,\
-                                          tracking_vec, tgt_yaw))
+                                          tracking_vec))
             state_with_noise = np.concatenate((state_with_noise,\
-                                                     tracking_vec_with_noise, tgt_yaw_with_noise))
+                                                     tracking_vec_with_noise))
         
-        if self._desired_action == "vel_track":
+        elif self._desired_action == "vel_track":
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
             state = np.concatenate((state, vel_cmd))
             state_with_noise = np.concatenate((state_with_noise, vel_cmd))
+
+        elif self._desired_action == "straight":
+            rel_x_com = pos_center[0] - self._oripoint[0]
+            rel_y_com = pos_center[1] - self._oripoint[1]
+            pos_cmd = np.array([rel_x_com, rel_y_com, self._reset_psi])
+            state = np.concatenate((state, pos_cmd))
+
+            if self._use_obs_noise == True:
+                pos_center_noise_del = (pos_rel_s0_with_noise + pos_rel_s1_with_noise + pos_rel_s2_with_noise + pos_rel_s3_with_noise + pos_rel_s4_with_noise + pos_rel_s5_with_noise)/6
+                rel_x_com_with_noise = rel_x_com + pos_center_noise_del[0]
+                rel_y_com_with_noise = rel_y_com + pos_center_noise_del[1]
+                pos_cmd_with_noise = np.array([rel_x_com_with_noise, rel_y_com_with_noise, self._reset_psi])
+                state_with_noise = np.concatenate((state_with_noise, pos_cmd_with_noise))
         
         if self._use_obs_noise == True:
             observation = state_with_noise
         else:
             observation = state
 
-        state = np.concatenate((state, np.array([
-            self.model.geom_friction[0, 0],  # friction coefficient of the first geom
-            self.model.tendon_damping[6],    # damping of side tendons
-            self.model.tendon_damping[12],   # damping of cross tendons
-            self.model.tendon_stiffness[6],  # stiffness of side tendons
-            self.model.tendon_stiffness[12]  # stiffness of cross tendons
-        ])))
+        if self._use_inherent_params_dr:
+            state = np.concatenate((state, np.array([
+                self.model.geom_friction[0, 0],  # friction coefficient of the first geom
+                self.model.tendon_damping[12],   # damping of cross tendons
+                self.model.tendon_stiffness[12]  # stiffness of cross tendons
+            ])))
 
         return state, observation
 
@@ -629,9 +626,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         stiffness_coeff = np.array([np.random.uniform(self._stiffness_noise_range_side[0], self._stiffness_noise_range_side[1]), np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])])
 
         self.model.geom_friction[:, 0] = friction_coeff
-        self.model.tendon_damping[6:12] = damping_coeff[0]
         self.model.tendon_damping[12:15] = damping_coeff[1]
-        self.model.tendon_stiffness[6:12] = stiffness_coeff[0]
         self.model.tendon_stiffness[12:15] = stiffness_coeff[1]
         return
 
@@ -693,7 +688,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             + self._reset_noise_scale * self.np_random.standard_normal(self.model.nv)
         )
 
-        if self._desired_action == "turn" or self._desired_action == "tracking" or self._desired_action == "aiming":
+        if self._desired_action == "turn" or self._desired_action == "tracking":
             self.set_state(qpos, qvel)
         # without rolling noise end
         #'''
@@ -775,28 +770,13 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             # if self._is_test == True: # for test3
             #     self._waypt = np.array([0, 0]) # for test3
         
-        elif self._desired_action == "aiming":
-            min_waypt_range, max_waypt_range = self._waypt_range
-            min_waypt_angle = -np.pi
-            max_waypt_angle = np.pi
-            waypt_length = np.random.uniform(min_waypt_range, max_waypt_range)
-            waypt_yaw = np.random.uniform(min_waypt_angle, max_waypt_angle) + self._reset_psi
-            if self._is_test == True:
-                kmm_length = 0.5
-                kmm_yaw = 0.75
-                waypt_length = kmm_length*max_waypt_range + (1-kmm_length)*min_waypt_range
-                waypt_yaw = (kmm_yaw*max_waypt_angle + (1-kmm_yaw)*min_waypt_angle) + self._reset_psi
-            self._waypt = np.array([self._oripoint[0] + waypt_length * np.cos(waypt_yaw), self._oripoint[1] + waypt_length * np.sin(waypt_yaw)])
-            if self._is_test == True: # for test3
-                self._waypt = np.array([0, 0]) # for test3
-        
         elif self._desired_action == "vel_track":
             lin_vel_scale = 0.5
             self._lin_vel_cmd = np.array([lin_vel_scale*np.cos(self._reset_psi), lin_vel_scale*np.sin(self._reset_psi)])
             self._ang_vel_cmd = 0.0
                 
         self._step_num = 0
-        if self._desired_action == "turn" or self._desired_action == "aiming":
+        if self._desired_action == "turn":
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
         state, observation = self._get_obs()
