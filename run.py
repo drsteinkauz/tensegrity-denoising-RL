@@ -105,7 +105,6 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
             
-            
             eps_num += 1
             writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
             writer.add_scalar("ep/ep_len", episode_len, eps_num)
