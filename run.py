@@ -103,6 +103,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+                torch.save(otf.state_dict(), os.path.join(model_dir, f"transformer_{step_num}.pth"))
 
             
             eps_num += 1
