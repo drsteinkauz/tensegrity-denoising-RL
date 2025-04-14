@@ -47,82 +47,94 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
 
     writer = SummaryWriter(log_dir, max_queue=10, flush_secs=30)
     timer = Timer()
+
+    state, observation = zip(*(env[i].reset()[0] for i in range(batch_size)))
+    #print(observation)
+    state = torch.from_numpy(np.array(state)).float()
+    observation = torch.from_numpy(np.array(observation)).float()
+    episode_reward = np.array([0.0 for _ in range(batch_size)])
+    episode_len = np.array([0 for _ in range(batch_size)])
+    episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
+    episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
+    info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=lr_Transformer)
+    feature = otf.get_feature(type_index=feature_type)
+    
     while True:
-        state, observation = zip(*(env[i].reset()[0] for i in range(batch_size)))
-        #print(observation)
-        state = torch.from_numpy(np.array(state)).float()
-        observation = torch.from_numpy(np.array(observation)).float()
-        episode_reward = np.array([0.0 for _ in range(batch_size)])
-        episode_len = 0
-        episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
-        episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
-        info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=lr_Transformer)
-        feature = otf.get_feature(type_index=feature_type)
         
+        #print(observation.shape)
+        try:
+            action_scaled = agent.select_action(feature)
+            mask = episode_len < agent.warmup_steps
+            num_replacements = np.sum(mask)
+            if num_replacements > 0:
+                action_scaled[mask] = np.random.uniform(-1, 1, size=(num_replacements, 6))
+        except:
+            print("select failed")
+            action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
+        # action_unscaled = action_scaled * 0.3 - 0.15
+        action_unscaled = action_scaled * 0.05
+        next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
+        #print("next_observation",next_observation.shape,"next_state[...,:18]",next_state[...,:18].shape)
+        #print(isinstance(done, np.ndarray),isinstance(next_observation, np.ndarray),isinstance(next_state, np.ndarray))
+        if done.any() or torch.isnan(next_observation).any() or (episode_len >= 5000).any():
+            mask = torch.isnan(next_observation).any(dim=1).cpu().numpy() | done | (episode_len >= 5000)
+            print("isnan(next_observation).any(),",np.where(mask)[0]," of env restarted")
+            mask_state, mask_observation = zip(*(env[i].reset()[0] for i in np.where(mask)[0]))
+            mask_state = torch.from_numpy(np.array(mask_state)).float()
+            mask_observation = torch.from_numpy(np.array(mask_observation)).float()
+            next_state[mask,:],next_observation[mask,:] = mask_state.to(device), mask_observation.to(device)
+            episode_reward[mask], episode_forward_reward[mask], episode_ctrl_reward[mask], episode_len[mask] = \
+                            np.zeros(mask.sum()), np.zeros(mask.sum()), np.zeros(mask.sum()), np.zeros(mask.sum())
+        info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
+        next_feature = otf.get_feature(type_index=0)
+        if torch.isnan(next_feature).any():
+            print("isnan(next_feature).any(), a group of env restarted")
+            break
+
+        agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
+        info_agent = agent.update()
+        state = next_state
+        observation = next_observation
+        feature = next_feature
+        for idx in range(batch_size):
+            episode_reward[idx] += reward[idx]
+            episode_forward_reward[idx] += info_env[idx]["reward_forward"]
+            episode_ctrl_reward[idx] += info_env[idx]["reward_ctrl"]
+
+        step_num += 1
+        episode_len += 1
+
+        if info_agent is not None:
+            writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
+            writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
+            writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
+            writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
+            writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
+            writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
+
+        if step_num % TIMESTEPS == 0:
+            torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+            torch.save(otf.state_dict(), os.path.join(model_dir, f"transformer_{step_num}.pth"))
+
         
-        while True:
-            #print(observation.shape)
-            if episode_len < agent.warmup_steps:
-                action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
-            else:
-                #action_scaled = [agent.select_action(feature[idx]) for idx in range(batch_size)]
-                action_scaled = agent.select_action(feature)
-            # action_unscaled = action_scaled * 0.3 - 0.15
-            action_unscaled = action_scaled * 0.05
-            next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
-            #print("next_observation",next_observation.shape,"next_state[...,:18]",next_state[...,:18].shape)
-            if done.any() or torch.isnan(next_observation).any() or episode_len >= 5000:
-                print("isnan(next_observation).any(), a group of env restarted")
-                break
-            info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
-            next_feature = otf.get_feature(type_index=0)
-            if torch.isnan(next_feature).any():
-                print("isnan(next_feature).any(), a group of env restarted")
-                break
-            #print("feature",feature.shape, next_feature.shape)
-            agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
-            info_agent = agent.update()
-            state = next_state
-            observation = next_observation
-            feature = next_feature
-            for idx in range(batch_size):
-                episode_reward[idx] += reward[idx]
-                episode_forward_reward[idx] += info_env[idx]["reward_forward"]
-                episode_ctrl_reward[idx] += info_env[idx]["reward_ctrl"]
-
-            step_num += 1
-            episode_len += 1
-
-            if info_agent is not None:
-                writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
-                writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
-                writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
-                writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
-                writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
-                writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
-
-            if step_num % TIMESTEPS == 0:
-                torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-                torch.save(otf.state_dict(), os.path.join(model_dir, f"transformer_{step_num}.pth"))
-
-            
-            eps_num += 1
-            writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
-            writer.add_scalar("ep/ep_len", episode_len, eps_num)
-            writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
-            
-            if eps_num % 100 == 0:
-                print("--------------------------------")
-                print(f"Episode {eps_num}")
-                print(f"ep_rew: {episode_reward}")
-                print(f"ep_fw_rew: {episode_forward_reward}")
-                print(f"ep_ctrl_rew: {episode_ctrl_reward}")
-                print(f"ep_len: {episode_len}")
-                print(f"step_num: {step_num}")
-                print(f"learning_rate: {agent.lr}")
-                time100 = timer.print_time()
-                print(f"{time100:.3g}s for 100 steps; {time100*2.5/9:.3g}h for 100k steps")
-                print("--------------------------------")
+        eps_num += 1
+        writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
+        for i, length in enumerate(episode_len):
+            writer.add_scalar("ep/ep_len", length, eps_num)
+        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
+        
+        if eps_num % 100 == 0:
+            print("--------------------------------")
+            print(f"Episode {eps_num}")
+            print(f"ep_rew: {episode_reward}")
+            print(f"ep_fw_rew: {episode_forward_reward}")
+            print(f"ep_ctrl_rew: {episode_ctrl_reward}")
+            print(f"ep_len: {episode_len}")
+            print(f"step_num: {step_num}")
+            print(f"learning_rate: {agent.lr}")
+            time100 = timer.print_time()
+            print(f"{time100:.3g}s for 100 steps; {time100*2.5/9:.3g}h for 100k steps")
+            print("--------------------------------")
     
     writer.close()
 
@@ -233,8 +245,8 @@ if __name__ == "__main__":
                          help="time in seconds to run simulation when testing, default is 30 seconds")
     parser.add_argument('--lr_SAC', default=3e-4, type=float,
                         help="learning rate for SAC, default is 3e-4")
-    parser.add_argument('--lr_Transformer', default=5e-5, type=float,
-                        help="learning rate for Transformer, default is 5e-5")
+    parser.add_argument('--lr_Transformer', default=1e-4, type=float,
+                        help="learning rate for Transformer, default is 1e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
     parser.add_argument('--batch_size', default=32, type=int,
