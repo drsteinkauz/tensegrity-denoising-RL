@@ -92,7 +92,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-                torch.save(agent.gruautoencoder.state_dict(), os.path.join(model_dir, f"gruautoencoder_{step_num}.pth"))
+                torch.save(agent.gruencoder.state_dict(), os.path.join(model_dir, f"gruencoder_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
@@ -134,7 +134,7 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     actor = ge_sac.PolicyNetwork(32, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    gae = ge_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
+    gae = ge_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
     gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
     gae.load_state_dict(gae_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
