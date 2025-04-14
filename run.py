@@ -8,6 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
 from timer import Timer
+torch.set_printoptions(linewidth=180)
 
 def batched_step(env, action,batch_size,device):
     """
@@ -24,6 +25,7 @@ def batched_step(env, action,batch_size,device):
     return next_state, next_observation, reward, done, info_env
 
 def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, feature_type=0):
+    
     feature_list = [41,105,82]
     state_dim = env[0].state_shape+5 # 5 is the number for damping and friction
     observation_dim = feature_list[feature_type]
@@ -58,7 +60,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
     episode_ctrl_reward = np.array([0.0 for _ in range(batch_size)])
     info_otf = otf.update(noised_input=observation, previledge=state, epoch=eps_num, learning_rate=lr_Transformer)
     feature = otf.get_feature(type_index=feature_type)
-    
+    timer.new_time_group(6)
     while True:
         
         #print(observation.shape)
@@ -71,11 +73,16 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         except:
             print("select failed")
             action_scaled = np.random.uniform(-1, 1, size=(batch_size,6))
+
+        timer.clip_group()
         # action_unscaled = action_scaled * 0.3 - 0.15
         action_unscaled = action_scaled * 0.05
         next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
         #print("next_observation",next_observation.shape,"next_state[...,:18]",next_state[...,:18].shape)
         #print(isinstance(done, np.ndarray),isinstance(next_observation, np.ndarray),isinstance(next_state, np.ndarray))
+        
+        timer.clip_group()
+
         if done.any() or torch.isnan(next_observation).any() or (episode_len >= 5000).any():
             mask = torch.isnan(next_observation).any(dim=1).cpu().numpy() | done | (episode_len >= 5000)
             print("isnan(next_observation).any(),",np.where(mask)[0]," of env restarted")
@@ -85,14 +92,21 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
             next_state[mask,:],next_observation[mask,:] = mask_state.to(device), mask_observation.to(device)
             episode_reward[mask], episode_forward_reward[mask], episode_ctrl_reward[mask], episode_len[mask] = \
                             np.zeros(mask.sum()), np.zeros(mask.sum()), np.zeros(mask.sum()), np.zeros(mask.sum())
+        
+        timer.clip_group()
+
         info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
         next_feature = otf.get_feature(type_index=0)
         if torch.isnan(next_feature).any():
             print("isnan(next_feature).any(), a group of env restarted")
             break
 
+        timer.clip_group()
+
         agent.replay_buffer.push(state, feature, action_scaled, reward, next_state, next_feature, done)
+        timer.clip_group()
         info_agent = agent.update()
+        
         state = next_state
         observation = next_observation
         feature = next_feature
@@ -115,7 +129,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         if step_num % TIMESTEPS == 0:
             torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
             torch.save(otf.state_dict(), os.path.join(model_dir, f"transformer_{step_num}.pth"))
-
+        
         
         eps_num += 1
         writer.add_scalar("ep/ep_rew", episode_reward.mean().item(), eps_num)
@@ -123,19 +137,25 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
             writer.add_scalar("ep/ep_len", length, eps_num)
         writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
         
+        timer.clip_group()
+
         if eps_num % 100 == 0:
             print("--------------------------------")
             print(f"Episode {eps_num}")
-            print(f"ep_rew: {episode_reward}")
-            print(f"ep_fw_rew: {episode_forward_reward}")
-            print(f"ep_ctrl_rew: {episode_ctrl_reward}")
-            print(f"ep_len: {episode_len}")
+            print(f"avg_ep_rew: {episode_reward.mean()}")
+            print(f"avg_ep_fw_rew: {episode_forward_reward.mean()}")
+            print(f"avg_ep_ctrl_rew: {episode_ctrl_reward.mean()}")
+            print(f"avg_ep_len: {episode_len.mean()}")
             print(f"step_num: {step_num}")
             print(f"learning_rate: {agent.lr}")
-            time100 = timer.print_time()
+            timer.group_print(["Action_Sample", "Batched_step", "Reset", "Update_Transformer", "Replay_buffer_Push", "Renew"])
+            timer.new_time_group(6)
+            time100 = timer.clip_time()
             print(f"{time100:.3g}s for 100 steps; {time100*2.5/9:.3g}h for 100k steps")
             print("--------------------------------")
-    
+
+        
+
     writer.close()
 
     
