@@ -152,6 +152,22 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     waypt_list = []
     x_pos_list = []
     y_pos_list = []
+
+    predicted_friction_list = []
+    predicted_damping_s_list = []
+    predicted_damping_c_list = []
+    predicted_stiffness_s_list = []
+    predicted_stiffness_c_list = []
+    friction_list = []
+    damping_s_list = []
+    damping_c_list = []
+    stiffness_s_list = []
+    stiffness_c_list = []
+
+    obs_posi_list = []
+    gt_posi_list = []
+    predicted_posi_list = []
+
     iter = int(simulation_seconds/dt)
     for i in range(iter):
         feature = gae.encode(torch.from_numpy(np.array([obs_act_seq])).float())
@@ -159,10 +175,26 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled * 0.05
-        _, obs, _, done, _, info = env.step(action_unscaled)
+        state, obs, _, done, _, info = env.step(action_unscaled)
 
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
+
+        predicted_state = gae.decode(feature).detach().cpu().numpy()
+        predicted_friction_list.append(predicted_state[0][-5])
+        predicted_damping_s_list.append(predicted_state[0][-4])
+        predicted_damping_c_list.append(predicted_state[0][-3])
+        predicted_stiffness_s_list.append(predicted_state[0][-2])
+        predicted_stiffness_c_list.append(predicted_state[0][-1])
+        friction_list.append(state[-5])
+        damping_s_list.append(state[-4])
+        damping_c_list.append(state[-3])
+        stiffness_s_list.append(state[-2])
+        stiffness_c_list.append(state[-1])
+
+        obs_posi_list.append(obs[:18])
+        gt_posi_list.append(state[:18])
+        predicted_posi_list.append(predicted_state[0][:18])
 
         actions_list.append(action_unscaled)
         #the tendon lengths are the last 9 observations
@@ -171,7 +203,6 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
         cap_posi_list.append(info["real_observation"][:18])
         reward_forward_list.append(info["reward_forward"])
         reward_ctrl_list.append(info["reward_ctrl"])
-        waypt_list.append(info["waypt"])
         x_pos_list.append(info["x_position"])
         y_pos_list.append(info["y_position"])
 
@@ -186,9 +217,11 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     cap_posi_array = np.array(cap_posi_list)
     reward_forward_array = np.array(reward_forward_list)
     reward_ctrl_array = np.array(reward_ctrl_list)
-    waypt_array = np.array(waypt_list)
     x_pos_array = np.array(x_pos_list)
     y_pos_array = np.array(y_pos_list)
+    oript_array = np.array(env._oripoint)
+    iniyaw_array = np.array([env._reset_psi])
+    waypt_array = np.array(env._waypt)
     np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
     np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
@@ -197,6 +230,24 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
     np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
+    np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
+    np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
+    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+
+    np.save(os.path.join(saved_data_dir, "predicted_friction_data.npy"),np.array(predicted_friction_list))
+    np.save(os.path.join(saved_data_dir, "predicted_damping_s_data.npy"),np.array(predicted_damping_s_list))
+    np.save(os.path.join(saved_data_dir, "predicted_damping_c_data.npy"),np.array(predicted_damping_c_list))
+    np.save(os.path.join(saved_data_dir, "predicted_stiffness_s_data.npy"),np.array(predicted_stiffness_s_list))
+    np.save(os.path.join(saved_data_dir, "predicted_stiffness_c_data.npy"),np.array(predicted_stiffness_c_list))
+    np.save(os.path.join(saved_data_dir, "friction_data.npy"),np.array(friction_list))
+    np.save(os.path.join(saved_data_dir, "damping_s_data.npy"),np.array(damping_s_list))
+    np.save(os.path.join(saved_data_dir, "damping_c_data.npy"),np.array(damping_c_list))
+    np.save(os.path.join(saved_data_dir, "stiffness_s_data.npy"),np.array(stiffness_s_list))
+    np.save(os.path.join(saved_data_dir, "stiffness_c_data.npy"),np.array(stiffness_c_list))
+
+    np.save(os.path.join(saved_data_dir, "obs_posi_data.npy"),np.array(obs_posi_list))
+    np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
+    np.save(os.path.join(saved_data_dir, "predicted_posi_data.npy"),np.array(predicted_posi_list))
 
 
 # Training loop

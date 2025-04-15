@@ -62,7 +62,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
         way_pts_range = (1.0, 1.0),
-        way_pts_angle_range = (-np.pi/6, np.pi/6),
+        # way_pts_angle_range = (-np.pi/6, np.pi/6),
+        way_pts_angle_range = (0.0, 0.0),
         threshold_waypt = 0.05,
         ditch_reward_max=200,
         ditch_reward_stdev=0.08,
@@ -366,7 +367,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1000:
+            if self._step_num > 3000:
                 terminated = True
         
         elif self._desired_action == "vel_tracking":
@@ -614,12 +615,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return lin_track_rew + ang_track_rew
     
     def _action_filter(self, action, last_action):
-        k_FILTER = 5
+        k_FILTER = 2
         vel_constraint = 0.1
 
         # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
-        # del_action = k_FILTER*(action - last_action)*self.dt
-        del_action = action / 0.05 * vel_constraint*self.dt
+        del_action = k_FILTER*(action - last_action)*self.dt
+        # del_action = action / 0.05 * vel_constraint*self.dt
 
         filtered_action = last_action + del_action
         return filtered_action
