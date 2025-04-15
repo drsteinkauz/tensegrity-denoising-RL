@@ -171,21 +171,21 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     cap_posi_array = np.array(cap_posi_list)
     reward_forward_array = np.array(reward_forward_list)
     reward_ctrl_array = np.array(reward_ctrl_list)
-    waypt_array = np.array(waypt_list)
     x_pos_array = np.array(x_pos_list)
     y_pos_array = np.array(y_pos_list)
     oript_array = np.array(env._oripoint)
     iniyaw_array = np.array([env._reset_psi])
+    waypt_array = np.array(env._waypt)
     np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
     np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
     np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
     np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
-    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
     np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
     np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
     np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
+    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
 
 
 # Training loop

@@ -31,7 +31,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_tendon_length=False,
         use_cap_velocity=True,
         use_obs_noise=False,
-        use_inherent_params_dr=True,
+        use_inherent_params_dr=False,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -62,7 +62,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
         way_pts_range = (1.0, 1.0),
-        way_pts_angle_range = (-np.pi/6, np.pi/6),
+        # way_pts_angle_range = (-np.pi/6, np.pi/6),
+        way_pts_angle_range = (0.0, 0.0),
         threshold_waypt = 0.05,
         ditch_reward_max=200,
         ditch_reward_stdev=0.08,
@@ -360,7 +361,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1000:
+            if self._step_num > 3000:
                 terminated = True
         
         elif self._desired_action == "vel_tracking":
@@ -610,12 +611,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return lin_track_rew + ang_track_rew
     
     def _action_filter(self, action, last_action):
-        k_FILTER = 5
+        k_FILTER = 2
         vel_constraint = 0.1
 
         # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
-        # del_action = k_FILTER*(action - last_action)*self.dt
-        del_action = action / 0.05 * vel_constraint*self.dt
+        del_action = k_FILTER*(action - last_action)*self.dt
+        # del_action = action / 0.05 * vel_constraint*self.dt
 
         filtered_action = last_action + del_action
         return filtered_action
@@ -659,7 +660,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                         [0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532]]
 
         idx_qpos = np.random.randint(0, 6)
-        # idx_qpos = 2
+        # idx_qpos = 0
         qpos = rolling_qpos[idx_qpos]
         
         noise_low = -self._reset_noise_scale
