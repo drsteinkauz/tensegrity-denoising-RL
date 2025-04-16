@@ -66,7 +66,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         way_pts_angle_range = (0.0, 0.0),
         threshold_waypt = 0.05,
         ditch_reward_max=200,
-        ditch_reward_stdev=0.08,
+        ditch_reward_stdev=0.05,
         waypt_reward_amplitude=100,
         waypt_reward_stdev=0.03,
         yaw_reward_weight=1,
@@ -586,7 +586,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     
     def _straight_potential(self, xy_position):
         k_ALONG = 5.0 / self.dt
-        stdev_BIAS = 0.08
+        stdev_BIAS = 0.05
         
         odom_position = xy_position - self._oripoint
         distance = np.linalg.norm(odom_position)
@@ -612,7 +612,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     
     def _action_filter(self, action, last_action):
         k_FILTER = 2
-        vel_constraint = 0.1
+        vel_constraint = 0.05
 
         del_action = np.clip(action - last_action, -vel_constraint*self.dt, vel_constraint*self.dt)
         # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
