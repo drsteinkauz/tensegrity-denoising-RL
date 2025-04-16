@@ -614,8 +614,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         k_FILTER = 2
         vel_constraint = 0.1
 
+        del_action = np.clip(action - last_action, -vel_constraint*self.dt, vel_constraint*self.dt)
         # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
-        del_action = k_FILTER*(action - last_action)*self.dt
+        # del_action = k_FILTER*(action - last_action)*self.dt
         # del_action = action / 0.05 * vel_constraint*self.dt
 
         filtered_action = last_action + del_action
