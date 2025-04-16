@@ -208,8 +208,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
     def control_cost(self, action, tendon_length_6):
         # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
-        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
+        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
+        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
     @property
