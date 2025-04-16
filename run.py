@@ -142,7 +142,9 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     y_pos_list = []
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+        # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+        action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+        action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled.detach() * 0.05
         _, obs, _, done, _, info = env.step(action_unscaled.numpy())
@@ -185,8 +187,61 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
     np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
     np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
-    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+    if env._desired_action == "tracking":
+        np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
 
+def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    actor = asac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    actor.load_state_dict(state_dict)
+    os.makedirs(saved_data_dir, exist_ok=True)
+
+    oript_list = []
+    xy_pos_list = []
+    iniyaw_list = []
+    if env._desired_action == "tracking":
+        waypt_list = []
+    for i in range(group_num):
+        _, obs = env.reset()[0]
+        done = False
+        extra_steps = 500
+
+        dt = env.dt
+        iter = int(simulation_seconds/dt)
+        for j in range(iter):
+            # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+            action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+            action_scaled = torch.tanh(action_scaled)
+            # action_unscaled = action_scaled.detach() * 0.3 - 0.15
+            action_unscaled = action_scaled.detach() * 0.05
+            _, obs, _, done, _, info = env.step(action_unscaled.numpy())
+
+            if done:
+                extra_steps -= 1
+                if extra_steps < 0:
+                    break
+        oript_list.append(np.array(env._oripoint))
+        xy_pos_list.append(np.array([info["x_position"], info["y_position"]]))
+        iniyaw_list.append(np.array([env._reset_psi]))
+        if env._desired_action == "tracking":
+            waypt_list.append(np.array(env._waypt))
+    oript_array = np.array(oript_list)
+    xy_pos_array = np.array(xy_pos_list) - oript_array
+    iniyaw_array = np.array(iniyaw_list)
+    if env._desired_action == "tracking":
+        waypt_array = np.array(waypt_list) - oript_array
+
+    for i in range(group_num):
+        iniyaw_ang = iniyaw_list[i][0]
+        rot_mat = np.array([[np.cos(iniyaw_ang), np.sin(iniyaw_ang)],[np.sin(iniyaw_ang), -np.cos(iniyaw_ang)]])
+        xy_pos_array[i] = np.dot(rot_mat, xy_pos_array[i].T).T
+        if env._desired_action == "tracking":
+            waypt_array[i] = np.dot(rot_mat, waypt_array[i].T).T
+    np.save(os.path.join(saved_data_dir, "group_xy_pos_data.npy"),xy_pos_array)
+    if env._desired_action == "tracking":
+        np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
 
 # Training loop
 if __name__ == "__main__":
@@ -196,8 +251,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--test', metavar='path_to_model')
-    parser.add_argument('--test3', metavar='path_to_model', nargs=3)
-    parser.add_argument('--tracking_test', metavar='path_to_model')
+    parser.add_argument('--group_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
     parser.add_argument('--env_xml', default="3tr_will_normal_size.xml", type=str,
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
@@ -256,3 +310,14 @@ if __name__ == "__main__":
             test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
+
+    if(args.group_test):
+        if os.path.isfile(args.group_test):
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
+                                        xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        is_test = True,
+                                        desired_action = args.desired_action,
+                                        desired_direction = args.desired_direction)
+            group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
+        else:
+            print(f'{args.group_test} not found.')
