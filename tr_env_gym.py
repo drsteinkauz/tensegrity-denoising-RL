@@ -43,7 +43,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         reset_noise_scale=0.0, # reset noise is handled in the following 4 variables
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
-        tendon_reset_mean = 0.0, # 0.15,
+        tendon_reset_mean = 0.05, # 0.15,
         tendon_reset_stdev = 0.0, # 0.2
         tendon_max_length = 0.05, # 0.15,
         tendon_min_length = -0.05, # -0.45,
@@ -61,13 +61,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         contact_with_self_penalty = 0.0,
         obs_noise_tendon_stdev = 0.02,
         obs_noise_cap_pos_stdev = 0.01,
+        iniyaw_bias = -np.pi/15,
         way_pts_range = (1.0, 1.0),
         # way_pts_angle_range = (-np.pi/6, np.pi/6),
         way_pts_angle_range = (0.0, 0.0),
         threshold_waypt = 0.05,
         ditch_reward_max=200,
         ditch_reward_stdev=0.05,
-        waypt_reward_amplitude=100,
+        waypt_reward_amplitude=50,
         waypt_reward_stdev=0.03,
         yaw_reward_weight=1,
         **kwargs
@@ -104,6 +105,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             contact_with_self_penalty,
             obs_noise_tendon_stdev,
             obs_noise_cap_pos_stdev,
+            iniyaw_bias,
             way_pts_range,
             way_pts_angle_range,
             threshold_waypt,
@@ -134,6 +136,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._waypt_reward_stdev = waypt_reward_stdev
         self._yaw_reward_weight = yaw_reward_weight
         self._waypt = None
+        self._iniyaw_bias = iniyaw_bias
 
         self._lin_vel_cmd = np.array([0.0, 0.0])
         self._ang_vel_cmd = 0.0
@@ -755,6 +758,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         right_COM_before = (pos_r01_right_end+pos_r23_right_end+pos_r45_right_end)/3
         orientation_vector_before = left_COM_before - right_COM_before
         self._reset_psi = np.arctan2(-orientation_vector_before[0], orientation_vector_before[1])
+        self._reset_psi += self._iniyaw_bias
+        self._reset_psi = np.arctan2(np.sin(self._reset_psi), np.cos(self._reset_psi))
         self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0])/2, (left_COM_before[1]+right_COM_before[1])/2])
         
 
