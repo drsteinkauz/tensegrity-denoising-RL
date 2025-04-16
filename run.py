@@ -129,14 +129,14 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     
     writer.close()
 
-def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
+def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = ge_sac.PolicyNetwork(32, env.action_space.shape[0]).to(device)
+    actor = ge_sac.PolicyNetwork(env.observation_space.shape[0]+env.inheparam_shape, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    gae = ge_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=32, output_dim=env.state_shape).to(device)
-    gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
-    gae.load_state_dict(gae_state_dict)
+    ge = ge_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.inheparam_shape).to(device)
+    ge_state_dict = torch.load(path_to_ge, map_location=torch.device(device=device))
+    ge.load_state_dict(ge_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
     _, obs, obs_act_seq = env.reset()[0]
@@ -170,7 +170,8 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
 
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        feature = gae.encode(torch.from_numpy(np.array([obs_act_seq])).float())
+        predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float())
+        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_inheparam], dim=-1)
         action_scaled, _ = actor.predict(feature)
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
@@ -180,21 +181,16 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
 
-        predicted_state = gae.decode(feature).detach().cpu().numpy()
-        predicted_friction_list.append(predicted_state[0][-5])
-        predicted_damping_s_list.append(predicted_state[0][-4])
-        predicted_damping_c_list.append(predicted_state[0][-3])
-        predicted_stiffness_s_list.append(predicted_state[0][-2])
-        predicted_stiffness_c_list.append(predicted_state[0][-1])
-        friction_list.append(state[-5])
-        damping_s_list.append(state[-4])
-        damping_c_list.append(state[-3])
-        stiffness_s_list.append(state[-2])
+        predicted_inheparam_numpy = predicted_inheparam.detach().cpu().numpy()
+        predicted_friction_list.append(predicted_inheparam_numpy[0][-3])
+        predicted_damping_c_list.append(predicted_inheparam_numpy[0][-2])
+        predicted_stiffness_c_list.append(predicted_inheparam_numpy[0][-1])
+        friction_list.append(state[-3])
+        damping_c_list.append(state[-2])
         stiffness_c_list.append(state[-1])
 
         obs_posi_list.append(obs[:18])
         gt_posi_list.append(state[:18])
-        predicted_posi_list.append(predicted_state[0][:18])
 
         actions_list.append(action_unscaled)
         #the tendon lengths are the last 9 observations
@@ -235,19 +231,14 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
 
     np.save(os.path.join(saved_data_dir, "predicted_friction_data.npy"),np.array(predicted_friction_list))
-    np.save(os.path.join(saved_data_dir, "predicted_damping_s_data.npy"),np.array(predicted_damping_s_list))
     np.save(os.path.join(saved_data_dir, "predicted_damping_c_data.npy"),np.array(predicted_damping_c_list))
-    np.save(os.path.join(saved_data_dir, "predicted_stiffness_s_data.npy"),np.array(predicted_stiffness_s_list))
     np.save(os.path.join(saved_data_dir, "predicted_stiffness_c_data.npy"),np.array(predicted_stiffness_c_list))
     np.save(os.path.join(saved_data_dir, "friction_data.npy"),np.array(friction_list))
-    np.save(os.path.join(saved_data_dir, "damping_s_data.npy"),np.array(damping_s_list))
     np.save(os.path.join(saved_data_dir, "damping_c_data.npy"),np.array(damping_c_list))
-    np.save(os.path.join(saved_data_dir, "stiffness_s_data.npy"),np.array(stiffness_s_list))
     np.save(os.path.join(saved_data_dir, "stiffness_c_data.npy"),np.array(stiffness_c_list))
 
     np.save(os.path.join(saved_data_dir, "obs_posi_data.npy"),np.array(obs_posi_list))
     np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
-    np.save(os.path.join(saved_data_dir, "predicted_posi_data.npy"),np.array(predicted_posi_list))
 
 
 # Training loop
@@ -315,6 +306,6 @@ if __name__ == "__main__":
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_actor=args.test[0], path_to_gae=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_actor=args.test[0], path_to_ge=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
