@@ -149,7 +149,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 
 
-        actions_list.append(action_unscaled.numpy())
+        actions_list.append(action_scaled.detach().numpy())
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
@@ -231,7 +231,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
 
     for i in range(group_num):
         iniyaw_ang = iniyaw_list[i][0]
-        rot_mat = np.array([[np.cos(iniyaw_ang), np.sin(iniyaw_ang)],[np.sin(iniyaw_ang), -np.cos(iniyaw_ang)]])
+        rot_mat = np.array([[np.cos(iniyaw_ang), np.sin(iniyaw_ang)],[-np.sin(iniyaw_ang), np.cos(iniyaw_ang)]])
         xy_pos_array[i] = np.dot(rot_mat, xy_pos_array[i].T).T
         if env._desired_action == "tracking":
             waypt_array[i] = np.dot(rot_mat, waypt_array[i].T).T
@@ -320,6 +320,7 @@ if __name__ == "__main__":
         if os.path.isfile(args.group_test):
             gymenv = tr_env_gym.tr_env_gym(render_mode='None',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
