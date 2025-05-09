@@ -208,7 +208,7 @@ class SACAgent:
     def select_action(self, obs_act_seq, observation, state):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
         predicted_inheparam = self.gruencoder.encode(obs_act_seq)
-        gt_inheparam = state[:, -self.inheparam_dim:].detach()
+        gt_inheparam = torch.FloatTensor(state[-self.inheparam_dim:]).to(self.device).unsqueeze(0)
         with torch.no_grad():
             # feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), predicted_inheparam], dim=-1)
             feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), gt_inheparam], dim=-1)
