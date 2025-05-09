@@ -190,7 +190,7 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
         obs_posi_list.append(obs[:18])
         gt_posi_list.append(state[:18])
 
-        actions_list.append(action_unscaled)
+        actions_list.append(action_scaled.detach().numpy())
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
