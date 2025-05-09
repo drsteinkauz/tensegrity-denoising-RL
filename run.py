@@ -57,9 +57,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(obs_act_seq, observation)
-            # action_unscaled = action_scaled * 0.3 - 0.15
-            action_unscaled = action_scaled * 0.05
-            next_state, next_observation, reward, done, _, info_env = env.step(action_unscaled)
+            next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
             next_obs_act_seq = np.concatenate((next_obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
             agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
@@ -176,7 +174,7 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled * 0.05
-        state, obs, _, done, _, info = env.step(action_unscaled)
+        state, obs, _, done, _, info = env.step(action_scaled)
 
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
@@ -252,7 +250,7 @@ if __name__ == "__main__":
     parser.add_argument('--test3', metavar='path_to_model', nargs=3)
     parser.add_argument('--tracking_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
-    parser.add_argument('--env_xml', default="3tr_will_normal_size.xml", type=str,
+    parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
     parser.add_argument('--sb3_algo', default="SAC", type=str, choices=["SAC", "TD3", "A2C", "PPO"],
                         help='StableBaseline3 RL algorithm: SAC, TD3, A2C, PPO')
@@ -287,9 +285,17 @@ if __name__ == "__main__":
     else:
         terminate_when_unhealthy = True
 
+    if args.env_xml == "w":
+        args.env_xml = "3tr_will_normal_size.xml"
+        robot_type = "w"
+    elif args.env_xml == "j":
+        args.env_xml = "3prism_jonathan_steady_side.xml"
+        robot_type = "j"
+
     if args.train:
         gymenv = tr_env_gym.tr_env_gym(render_mode="None",
                                     xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                    robot_type=robot_type,
                                     is_test = False,
                                     desired_action = args.desired_action,
                                     desired_direction = args.desired_direction,
@@ -303,6 +309,7 @@ if __name__ == "__main__":
         if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
             gymenv = tr_env_gym.tr_env_gym(render_mode='human',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)

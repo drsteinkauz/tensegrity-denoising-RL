@@ -43,34 +43,43 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         reset_noise_scale=0.0, # reset noise is handled in the following 4 variables
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
-        tendon_reset_mean = 0.05, # 0.15,
-        tendon_reset_stdev = 0.0, # 0.2
-        tendon_max_length = 0.05, # 0.15,
-        tendon_min_length = -0.05, # -0.45,
         reward_delay_seconds = 0.02, # 0.5,
-        # friction_noise_range = (0.25, 2.0),
-        # damping_noise_range_side = (0.25, 4.0),
-        # damping_noise_range_cross = (2.5, 40),
-        # stiffness_noise_range_side = (5, 20),
-        # stiffness_noise_range_cross = (75, 300),
-        friction_noise_range = (0.25, 2),
-        damping_noise_range_side = (0.25, 4),
-        damping_noise_range_cross = (2.5, 40),
-        stiffness_noise_range_side = (2.5, 40),
-        stiffness_noise_range_cross = (75, 300),
+        
         contact_with_self_penalty = 0.0,
-        obs_noise_tendon_stdev = 0.02,
-        obs_noise_cap_pos_stdev = 0.01,
-        iniyaw_bias = -np.pi/15,
-        way_pts_range = (1.0, 1.0),
-        # way_pts_angle_range = (-np.pi/6, np.pi/6),
-        way_pts_angle_range = (0.0, 0.0),
-        threshold_waypt = 0.05,
+        robot_type = "w",
+        tendon_reset_mean_w = 0.05,
+        tendon_reset_stdev_w = 0.0,
+        tendon_max_length_w = 0.05,
+        tendon_min_length_w = -0.05,
+        tendon_max_vel_w = 0.05,
+        tendon_reset_mean_j = 0.15,
+        tendon_reset_stdev_j = 0.2,
+        tendon_max_length_j = 0.15,
+        tendon_min_length_j = -0.45,
+        tendon_max_vel_j = 0.15,
+        friction_noise_range_w = (0.25, 2),
+        damping_noise_range_cross_w = (2.5, 40),
+        stiffness_noise_range_cross_w = (75, 300),
+        friction_noise_range_j = (0.25, 2),
+        damping_noise_range_cross_j = (50, 200),
+        stiffness_noise_range_cross_j = (500, 1000),
+        obs_noise_tendon_stdev_w = 0.02,
+        obs_noise_cap_pos_stdev_w = 0.01,
+        obs_noise_tendon_stdev_j = 0.02,
+        obs_noise_cap_pos_stdev_j = 0.05,
+        iniyaw_bias_w = -np.pi/15,
+        way_pts_range_w = (1.0, 1.0),
+        way_pts_angle_range_w = (0.0, 0.0),
+        iniyaw_bias_j = np.pi/15,
+        way_pts_range_j = (3.0, 3.0),
+        way_pts_angle_range_j = (-np.pi/6, np.pi/6),
         ditch_reward_max=200,
-        ditch_reward_stdev=0.05,
+        ditch_reward_stdev_w=0.05,
+        ditch_reward_stdev_j=0.15,
         waypt_reward_amplitude=50,
-        waypt_reward_stdev=0.03,
-        yaw_reward_weight=1,
+        waypt_reward_stdev_w=0.03,
+        waypt_reward_stdev_j=0.1,
+        threshold_waypt = 0.05,
         **kwargs
     ):
         utils.EzPickle.__init__(
@@ -92,28 +101,42 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             reset_noise_scale,
             min_reset_heading,
             max_reset_heading,
-            tendon_reset_mean,
-            tendon_reset_stdev,
-            tendon_max_length,
-            tendon_min_length,
             reward_delay_seconds,
-            friction_noise_range,
-            damping_noise_range_side,
-            damping_noise_range_cross,
-            stiffness_noise_range_side,
-            stiffness_noise_range_cross,
             contact_with_self_penalty,
-            obs_noise_tendon_stdev,
-            obs_noise_cap_pos_stdev,
-            iniyaw_bias,
-            way_pts_range,
-            way_pts_angle_range,
-            threshold_waypt,
+            robot_type,
+            tendon_reset_mean_w,
+            tendon_reset_stdev_w,
+            tendon_max_length_w,
+            tendon_min_length_w,
+            tendon_max_vel_w,
+            tendon_reset_mean_j,
+            tendon_reset_stdev_j,
+            tendon_max_length_j,
+            tendon_min_length_j,
+            tendon_max_vel_j,
+            friction_noise_range_w,
+            damping_noise_range_cross_w,
+            stiffness_noise_range_cross_w,
+            friction_noise_range_j,
+            damping_noise_range_cross_j,
+            stiffness_noise_range_cross_j,
+            obs_noise_tendon_stdev_w,
+            obs_noise_cap_pos_stdev_w,
+            obs_noise_tendon_stdev_j,
+            obs_noise_cap_pos_stdev_j,
+            iniyaw_bias_w,
+            way_pts_range_w,
+            way_pts_angle_range_w,
+            iniyaw_bias_j,
+            way_pts_range_j,
+            way_pts_angle_range_j,
             ditch_reward_max,
-            ditch_reward_stdev,
+            ditch_reward_stdev_w,
+            ditch_reward_stdev_j,
             waypt_reward_amplitude,
-            waypt_reward_stdev,
-            yaw_reward_weight,
+            waypt_reward_stdev_w,
+            waypt_reward_stdev_j,
+            threshold_waypt,
             **kwargs
         )
         self._x_velocity = 1
@@ -125,40 +148,66 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._psi_wrap_around_count = 0
         self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
+
+        self._use_obs_noise = use_obs_noise
+        self._use_inherent_params_dr = use_inherent_params_dr
+
+        self._min_reset_heading = min_reset_heading
+        self._max_reset_heading = max_reset_heading
+        self._robot_type = robot_type
         
         self._oripoint = None
-        self._waypt_range = way_pts_range
-        self._waypt_angle_range = way_pts_angle_range
         self._threshold_waypt = threshold_waypt
         self._ditch_reward_max = ditch_reward_max
-        self._ditch_reward_stdev = ditch_reward_stdev
         self._waypt_reward_amplitude = waypt_reward_amplitude
-        self._waypt_reward_stdev = waypt_reward_stdev
-        self._yaw_reward_weight = yaw_reward_weight
         self._waypt = None
-        self._iniyaw_bias = iniyaw_bias
 
         self._lin_vel_cmd = np.array([0.0, 0.0])
         self._ang_vel_cmd = 0.0
 
 
-        self._use_obs_noise = use_obs_noise
-        self._obs_noise_tendon_stdev = obs_noise_tendon_stdev
-        self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev
-        self._use_inherent_params_dr = use_inherent_params_dr
+        if self._robot_type == "w":
+            self._tendon_reset_mean = tendon_reset_mean_w
+            self._tendon_reset_stdev = tendon_reset_stdev_w
+            self._tendon_max_length = tendon_max_length_w
+            self._tendon_min_length = tendon_min_length_w
+            self._tendon_max_vel = tendon_max_vel_w
 
-        self._min_reset_heading = min_reset_heading
-        self._max_reset_heading = max_reset_heading
-        self._tendon_reset_mean = tendon_reset_mean
-        self._tendon_reset_stdev = tendon_reset_stdev
-        self._tendon_max_length = tendon_max_length
-        self._tendon_min_length = tendon_min_length
+            self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_w
+            self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_w
+            self._friction_noise_range = friction_noise_range_w
+            self._damping_noise_range_cross = damping_noise_range_cross_w
+            self._stiffness_noise_range_cross = stiffness_noise_range_cross_w
 
-        self._friction_noise_range = friction_noise_range
-        self._damping_noise_range_side = damping_noise_range_side
-        self._damping_noise_range_cross = damping_noise_range_cross
-        self._stiffness_noise_range_side = stiffness_noise_range_side
-        self._stiffness_noise_range_cross = stiffness_noise_range_cross
+            self._iniyaw_bias = iniyaw_bias_w
+
+            self._waypt_range = way_pts_range_w
+            self._waypt_angle_range = way_pts_angle_range_w
+            self._ditch_reward_stdev = ditch_reward_stdev_w
+            self._waypt_reward_stdev = waypt_reward_stdev_w
+
+        elif self._robot_type == "j":
+            self._tendon_reset_mean = tendon_reset_mean_j
+            self._tendon_reset_stdev = tendon_reset_stdev_j
+            self._tendon_max_length = tendon_max_length_j
+            self._tendon_min_length = tendon_min_length_j
+            self._tendon_max_vel = tendon_max_vel_j
+
+            self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_j
+            self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_j
+            self._friction_noise_range = friction_noise_range_j
+            self._damping_noise_range_cross = damping_noise_range_cross_j
+            self._stiffness_noise_range_cross = stiffness_noise_range_cross_j
+
+            self._iniyaw_bias = iniyaw_bias_j
+
+            self._waypt_range = way_pts_range_j
+            self._waypt_angle_range = way_pts_angle_range_j
+            self._ditch_reward_stdev = ditch_reward_stdev_j
+            self._waypt_reward_stdev = waypt_reward_stdev_j
+
+        else:
+            raise ValueError("robot_type should be either w or j")
 
         self._healthy_reward = healthy_reward
         self._terminate_when_unhealthy = terminate_when_unhealthy
@@ -256,7 +305,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         terminated = not self.is_healthy if self._terminate_when_unhealthy else False
         return terminated
 
-    def step(self, action):
+    def step(self, action_scaled):
+        # action: [-1, 1] -> [tendon_min_length, tendon_max_length]
+        action = action_scaled * (self._tendon_max_length - self._tendon_min_length) / 2 + (self._tendon_max_length + self._tendon_min_length) / 2
         
         xy_position_before = (self.get_body_com("r01_body")[:2].copy() + \
                             self.get_body_com("r23_body")[:2].copy() + \
@@ -564,9 +615,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             observation = state
         
         if self._use_inherent_params_dr:
-            state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
-                                    self.model.tendon_damping[12],  # damping of cross tendon
-                                    self.model.tendon_stiffness[12]])))  # stiffness of cross tendon
+            if self._robot_type == "w":
+                state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
+                                        self.model.tendon_damping[12],  # damping of cross tendon
+                                        self.model.tendon_stiffness[12]])))  # stiffness of cross tendon
+            elif self._robot_type == "j":
+                state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
+                                        self.model.tendon_damping[6],  # damping of cross tendon
+                                        self.model.tendon_stiffness[6]]))) # stiffness of cross tendon
 
         return state, observation
 
@@ -619,7 +675,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     
     def _action_filter(self, action, last_action):
         k_FILTER = 2
-        vel_constraint = 0.05
+        vel_constraint = self._tendon_max_vel
 
         del_action = np.clip(action - last_action, -vel_constraint*self.dt, vel_constraint*self.dt)
         # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
@@ -631,12 +687,17 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
     def _reset_inherent_params(self):
         friction_coeff = np.random.uniform(self._friction_noise_range[0], self._friction_noise_range[1])
-        damping_coeff = np.array([np.random.uniform(self._damping_noise_range_side[0], self._damping_noise_range_side[1]), np.random.uniform(self._damping_noise_range_cross[0], self._damping_noise_range_cross[1])])
-        stiffness_coeff = np.array([np.random.uniform(self._stiffness_noise_range_side[0], self._stiffness_noise_range_side[1]), np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])])
+        damping_coeff = np.random.uniform(self._damping_noise_range_cross[0], self._damping_noise_range_cross[1])
+        stiffness_coeff = np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])
 
-        self.model.geom_friction[:, 0] = friction_coeff
-        self.model.tendon_damping[12:15] = damping_coeff[1]
-        self.model.tendon_stiffness[12:15] = stiffness_coeff[1]
+        if self._robot_type == "w":
+            self.model.geom_friction[:, 0] = friction_coeff
+            self.model.tendon_damping[12:15] = damping_coeff
+            self.model.tendon_stiffness[12:15] = stiffness_coeff
+        elif self._robot_type == "j":
+            self.model.geom_friction[:, 0] = friction_coeff
+            self.model.tendon_damping[6:9] = damping_coeff
+            self.model.tendon_stiffness[6:9] = stiffness_coeff
         return
 
 
@@ -654,18 +715,22 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         # rolling_qpos = [[0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166, 0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359, 0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352],
         #                 [0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359, 0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352, 0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166],
         #                 [0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352, 0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166, 0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359]]
-        # rolling_qpos = [[0.07900689, -0.32670045,  0.23079722,  0.49365198, -0.74001353,  0.26668361,  0.37090101,  0.13713385, -0.24342633,  0.32722167,  0.82936968, -0.31256817, -0.46189217, -0.03320677,  0.04903377, -0.3421725,   0.36675097,  0.33407281,  0.43794432, -0.72515863, -0.41321313],
-        #                 [0.15521685, -0.20651043,  0.38922255,  0.85639289, -0.26723449, -0.44110818, -0.02450564,  0.02999107, -0.33576412,  0.43868814,  0.33839518,  0.48544838, -0.73094128, -0.33993149,  0.08083394, -0.31942006,  0.25783949,  0.51726058, -0.74281033,  0.29432583,  0.30667022],
-        #                 [0.02985312, -0.33588999,  0.43866597,  0.33840617,  0.48522953, -0.73107566, -0.33994403,  0.08072907, -0.31942136,  0.25766037,  0.51740763, -0.74276722,  0.29421311,  0.30663471,  0.15537661, -0.20664637,  0.38923648,  0.85640002, -0.26722239, -0.44110397, -0.02446392],
-        #                 [0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277],
-        #                 [0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798],
-        #                 [0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067]]
-        rolling_qpos = [[0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355],
-                        [0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669],
-                        [0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013],
-                        [0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358],
-                        [0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894],
-                        [0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532]]
+        if self._robot_type == "j":
+            rolling_qpos = [[0.07900689, -0.32670045,  0.23079722,  0.49365198, -0.74001353,  0.26668361,  0.37090101,  0.13713385, -0.24342633,  0.32722167,  0.82936968, -0.31256817, -0.46189217, -0.03320677,  0.04903377, -0.3421725,   0.36675097,  0.33407281,  0.43794432, -0.72515863, -0.41321313],
+                            [0.15521685, -0.20651043,  0.38922255,  0.85639289, -0.26723449, -0.44110818, -0.02450564,  0.02999107, -0.33576412,  0.43868814,  0.33839518,  0.48544838, -0.73094128, -0.33993149,  0.08083394, -0.31942006,  0.25783949,  0.51726058, -0.74281033,  0.29432583,  0.30667022],
+                            [0.02985312, -0.33588999,  0.43866597,  0.33840617,  0.48522953, -0.73107566, -0.33994403,  0.08072907, -0.31942136,  0.25766037,  0.51740763, -0.74276722,  0.29421311,  0.30663471,  0.15537661, -0.20664637,  0.38923648,  0.85640002, -0.26722239, -0.44110397, -0.02446392],
+                            [0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277],
+                            [0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798],
+                            [0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067]]
+        elif self._robot_type == "w":
+            rolling_qpos = [[0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355],
+                            [0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669],
+                            [0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013],
+                            [0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358],
+                            [0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894],
+                            [0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532]]
+        else:
+            raise ValueError("Robot type not supported")
 
         idx_qpos = np.random.randint(0, 6)
         # idx_qpos = 0
