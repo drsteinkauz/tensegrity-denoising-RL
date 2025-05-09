@@ -40,7 +40,7 @@
         <geom conaffinity="1" condim="6" contype="1" rgba="0.75 0.75 0.75 1" size="0.0014" solref="-5000 -50"
               density="1000" friction="1.0 0.005 0.0001"/>
         <site type="sphere" size="0.002"/>
-        <general ctrllimited='true' ctrlrange="-0.05 0.05" dyntype="none" gainprm="635 0 0" biastype="affine" dynprm="1 0 0" biasprm="90 -635 -31.75" forcelimited="true" forcerange="-63.5 0"/>
+        <general ctrllimited='true' ctrlrange="-0.05 0.05" dyntype="filter" gainprm="635 0 0" biastype="affine" dynprm="1 0 0" biasprm="90 -635 -31.75" forcelimited="true" forcerange="-63.5 0"/>
     </default>
 
     <asset>

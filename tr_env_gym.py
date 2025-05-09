@@ -80,6 +80,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         waypt_reward_stdev_w=0.03,
         waypt_reward_stdev_j=0.1,
         threshold_waypt = 0.05,
+        forrew_rate_w=3.0,
+        forrew_rate_j=1.0,
         **kwargs
     ):
         utils.EzPickle.__init__(
@@ -186,6 +188,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._ditch_reward_stdev = ditch_reward_stdev_w
             self._waypt_reward_stdev = waypt_reward_stdev_w
 
+            self._forrew_rate = forrew_rate_w
+
         elif self._robot_type == "j":
             self._tendon_reset_mean = tendon_reset_mean_j
             self._tendon_reset_stdev = tendon_reset_stdev_j
@@ -205,6 +209,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._waypt_angle_range = way_pts_angle_range_j
             self._ditch_reward_stdev = ditch_reward_stdev_j
             self._waypt_reward_stdev = waypt_reward_stdev_j
+
+            self._forrew_rate = forrew_rate_j
 
         else:
             raise ValueError("robot_type should be either w or j")
@@ -231,8 +237,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
         elif desired_action == "tracking":
             obs_shape += 2 # tracking vector x, y
-        elif desired_action == "straight":
-            obs_shape += 3 # del_x, del_y, psi
         
         self.inheparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
         self.inheparam_range = np.array([[self._friction_noise_range[0], self._friction_noise_range[1]],
@@ -326,7 +330,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         psi_before = np.arctan2(-orientation_vector_before[0], orientation_vector_before[1])
 
         filtered_action = self._action_filter(action, self.data.ctrl[:].copy())
-        self.do_simulation(filtered_action, self.frame_skip)
+        # self.do_simulation(filtered_action, self.frame_skip)
+        if self._robot_type == "w":
+            self.do_simulation(action, self.frame_skip)
+        elif self._robot_type == "j":
+            self.data.ctrl[:] = action.copy()
+            for _ in range(self.frame_skip):
+                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.2 - 1), -4 * np.ones(6))
+                crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
+                self.model.actuator_forcerange[:, 0] = crt_min_force
+                mujoco.mj_step(self.model, self.data)
+            mujoco.mj_rnePostConstraint(self.model, self.data)
+        
         xy_position_after = (self.get_body_com("r01_body")[:2].copy() + \
                             self.get_body_com("r23_body")[:2].copy() + \
                             self.get_body_com("r45_body")[:2].copy())/3
@@ -394,7 +409,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             # forward_reward = self._desired_direction*\
             #                     (np.sqrt((x_position_after-x_position_before)**2 + \
             #                             (y_position_after - y_position_before)**2) *\
-            #                     np.cos(psi_diff)/ self.dt) * 5.0
+            #                     np.cos(psi_diff)/ self.dt) * self._forrew_rate
 
             before_potential = self._straight_potential(xy_position_before)
             after_potential = self._straight_potential(xy_position_after)
@@ -421,7 +436,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 3000:
+            if self._step_num > 1500:
+                terminated = True
+            if np.linalg.norm(xy_position_after - self._waypt) < self._threshold_waypt:
                 terminated = True
         
         elif self._desired_action == "vel_tracking":
@@ -586,28 +603,21 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tgt_yaw = np.array([np.arctan2(tgt_drct[1], tgt_drct[0])])
             tgt_yaw_with_noise = np.array([np.arctan2(tgt_drct_with_noise[1], tgt_drct_with_noise[0])])
 
-            state = np.concatenate((state,\
-                                          tracking_vec))
-            state_with_noise = np.concatenate((state_with_noise,\
-                                                     tracking_vec_with_noise))
+            if np.linalg.norm(tracking_vec) < 1.0:
+                state = np.concatenate((state,\
+                                            tracking_vec))
+                state_with_noise = np.concatenate((state_with_noise,\
+                                                        tracking_vec_with_noise))
+            else:
+                state = np.concatenate((state,\
+                                            tgt_drct))
+                state_with_noise = np.concatenate((state_with_noise,\
+                                                        tgt_drct_with_noise))
         
         elif self._desired_action == "vel_track":
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
             state = np.concatenate((state, vel_cmd))
             state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-
-        elif self._desired_action == "straight":
-            rel_x_com = pos_center[0] - self._oripoint[0]
-            rel_y_com = pos_center[1] - self._oripoint[1]
-            pos_cmd = np.array([rel_x_com, rel_y_com, self._reset_psi])
-            state = np.concatenate((state, pos_cmd))
-
-            if self._use_obs_noise == True:
-                pos_center_noise_del = (pos_rel_s0_with_noise + pos_rel_s1_with_noise + pos_rel_s2_with_noise + pos_rel_s3_with_noise + pos_rel_s4_with_noise + pos_rel_s5_with_noise)/6
-                rel_x_com_with_noise = rel_x_com + pos_center_noise_del[0]
-                rel_y_com_with_noise = rel_y_com + pos_center_noise_del[1]
-                pos_cmd_with_noise = np.array([rel_x_com_with_noise, rel_y_com_with_noise, self._reset_psi])
-                state_with_noise = np.concatenate((state_with_noise, pos_cmd_with_noise))
         
         if self._use_obs_noise == True:
             observation = state_with_noise
@@ -641,22 +651,24 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         tracking_vec = self._waypt - xy_position
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
-        dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+        # dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
 
-        ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+        # ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+
+        # if self._robot_type == "w":
+        #     center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
+
+        #     ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
+        #     waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+
+        ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
         waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        if self._robot_type == "w":
-            center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
-
-            ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
-            waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-        
         return ditch_rew+waypt_rew
     
     def _straight_potential(self, xy_position):
-        k_ALONG = 5.0 / self.dt
-        stdev_BIAS = 0.05
+        k_ALONG = self._forrew_rate / self.dt
+        stdev_BIAS = self._ditch_reward_stdev
 
         odom_position = xy_position - self._oripoint
         distance = np.linalg.norm(odom_position)
@@ -666,7 +678,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         distance_along = distance * np.cos(yaw_diff)
         distance_bias = np.abs(distance * np.sin(yaw_diff))
 
-        potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
+        potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
         return potential
     
     def _vel_track_rew(self, vel_cmd, vel_bwd):
@@ -681,7 +693,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return lin_track_rew + ang_track_rew
     
     def _action_filter(self, action, last_action):
-        k_FILTER = 2
+        k_FILTER = 1.0
         vel_constraint = self._tendon_max_vel
 
         del_action = np.clip(action - last_action, -vel_constraint*self.dt, vel_constraint*self.dt)
