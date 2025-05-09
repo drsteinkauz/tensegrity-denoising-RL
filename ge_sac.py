@@ -205,11 +205,13 @@ class SACAgent:
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)
     
-    def select_action(self, obs_act_seq, observation):
+    def select_action(self, obs_act_seq, observation, state):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
         predicted_inheparam = self.gruencoder.encode(obs_act_seq)
+        gt_inheparam = state[:, -self.inheparam_dim:].detach()
         with torch.no_grad():
-            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), predicted_inheparam], dim=-1)
+            # feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), predicted_inheparam], dim=-1)
+            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), gt_inheparam], dim=-1)
             action, _, _ = self.actor.sample(feature)
         return action.squeeze(0).cpu().numpy()
     
@@ -234,11 +236,12 @@ class SACAgent:
         state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
         predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch)
-        feature_batch = torch.cat([observation_batch, predicted_inheparam_batch], dim=-1)
+        gt_inheparam_batch = state_batch[:, -self.inheparam_dim:].detach()
+        # feature_batch = torch.cat([observation_batch, predicted_inheparam_batch], dim=-1)
+        feature_batch = torch.cat([observation_batch, gt_inheparam_batch], dim=-1)
         sampled_action, action_log_prob, std = self.actor.sample(feature_batch.detach())
 
         # GRUAutoEncoder update
-        gt_inheparam_batch = state_batch[:, -self.inheparam_dim:].detach()
         predicted_inheparam_batch_normalized = (predicted_inheparam_batch - self.inheparam_mean) / self.inheparam_std
         gt_inheparam_batch_normalized = (gt_inheparam_batch - self.inheparam_mean) / self.inheparam_std
         predict_error = F.mse_loss(predicted_inheparam_batch_normalized, gt_inheparam_batch_normalized)
@@ -260,7 +263,9 @@ class SACAgent:
         # Critic update
         with torch.no_grad():
             next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch)
-            next_feature_batch = torch.cat([next_observation_batch, next_predicted_inheparam_batch], dim=-1)
+            next_gt_inheparam_batch = next_state_batch[:, -self.inheparam_dim:].detach()
+            # next_feature_batch = torch.cat([next_observation_batch, next_predicted_inheparam_batch], dim=-1)
+            next_feature_batch = torch.cat([next_observation_batch, next_gt_inheparam_batch], dim=-1)
             sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_feature_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
