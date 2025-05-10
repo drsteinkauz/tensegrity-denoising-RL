@@ -69,7 +69,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         iniyaw_bias_w = -np.pi/15,
         way_pts_range_w = (1.0, 1.0),
         way_pts_angle_range_w = (0.0, 0.0),
-        iniyaw_bias_j = np.pi/15,
+        iniyaw_bias_j = np.pi/12,
         way_pts_range_j = (3.0, 3.0),
         way_pts_angle_range_j = (-np.pi/12, np.pi/12),
         ditch_reward_max=200,
@@ -329,7 +329,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif self._robot_type == "j":
             self.data.ctrl[:] = action.copy()
             for _ in range(self.frame_skip):
-                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.2 - 1), -4 * np.ones(6))
+                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.15 - 1), -4 * np.ones(6))
                 crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
                 self.model.actuator_forcerange[:, 0] = crt_min_force
                 mujoco.mj_step(self.model, self.data)
