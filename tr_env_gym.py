@@ -228,7 +228,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         self._contact_with_self_penalty = contact_with_self_penalty
 
-        obs_shape = 18
+        obs_shape = 18+1
         if use_tendon_length:
             obs_shape += 9
         if use_contact_forces:
@@ -510,6 +510,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         pos_r45_left_end = self.data.geom("s4").xpos.copy()
         pos_r45_right_end = self.data.geom("s5").xpos.copy()
 
+        z = [pos_r01_left_end[-1],pos_r01_right_end[-1],pos_r23_left_end[-1],pos_r23_right_end[-1],pos_r45_left_end[-1],pos_r45_right_end[-1]]
+        #print(z)
+        stability = self.stable(z,threshold=1e-3)
+        #print(stability)
         pos_center = (pos_r01_left_end + pos_r01_right_end + pos_r23_left_end + pos_r23_right_end + pos_r45_left_end + pos_r45_right_end) / 6
 
         pos_rel_s0 = pos_r01_left_end - pos_center # 3
@@ -544,8 +548,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-        state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
+        state = np.concatenate(([stability],pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
+        state_with_noise = np.concatenate(([stability],pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
@@ -584,9 +588,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             random = rng.standard_normal(size=3)
             vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
 
-            state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
+            state = np.concatenate((state,\
                                         vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
-            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+            state_with_noise = np.concatenate((state,\
                                         vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
             
         if self._use_tendon_length:
@@ -635,6 +639,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                                         self.model.tendon_stiffness[6]]))) # stiffness of cross tendon
 
         return state, observation
+
+    def stable(self,arr, threshold=1e-3):
+        if len(arr) < 3:
+            return False  
+
+        sorted_arr = sorted(arr)
+        min1, min2, min3 = sorted_arr[0], sorted_arr[1], sorted_arr[2]
+
+        if abs(min1 - min3) < threshold:
+            return 1
+        else:
+            return 0
 
     def _angle_normalize(self, theta):
         if theta > np.pi:
@@ -886,6 +902,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         state, observation = self._get_obs()
 
         return state, observation, obs_act_seq
+
+
 
     def viewer_setup(self):
         assert self.viewer is not None

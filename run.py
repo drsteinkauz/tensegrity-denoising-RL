@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 import time
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
+def train(env, log_dir, model_dir, lr,gre_lr=1e-3, gpu_idx=None, tb_step_recorder="False"):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -19,7 +19,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_range=env.inheparam_range, device=device)
 
     agent.lr = lr
-    
+    agent.lr_GE = gre_lr
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
@@ -278,6 +278,8 @@ if __name__ == "__main__":
                         help="learning rate for SAC, default is 3e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
+    parser.add_argument('--gre_lr', default=1e-3, type=float,
+                        help="grelr")
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -301,7 +303,7 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)
         if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC,gre_lr =args.gre_lr,  gpu_idx=args.gpu_idx, starting_point= args.starting_point)
         else:
             train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
 
