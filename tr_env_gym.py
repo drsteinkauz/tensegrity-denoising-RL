@@ -30,6 +30,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_contact_forces=False,
         use_tendon_length=False,
         use_cap_velocity=True,
+        use_stability_detection=True,
         use_obs_noise=False,
         use_inherent_params_dr=True,
         terminate_when_unhealthy=True,
@@ -90,6 +91,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             use_contact_forces,
             use_tendon_length,
             use_cap_velocity,
+            use_stability_detection,
             use_obs_noise,
             use_inherent_params_dr,
             terminate_when_unhealthy,
@@ -150,6 +152,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._psi_wrap_around_count = 0
         self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
+        self._use_stability_detection = use_stability_detection
 
         self._use_obs_noise = use_obs_noise
         self._use_inherent_params_dr = use_inherent_params_dr
@@ -228,9 +231,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         self._contact_with_self_penalty = contact_with_self_penalty
 
-        obs_shape = 18+1
+        obs_shape = 18
         if use_tendon_length:
             obs_shape += 9
+        if use_stability_detection:
+            obs_shape += 1
         if use_contact_forces:
             obs_shape += 84
         if desired_action == "vel_track":
@@ -510,10 +515,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         pos_r45_left_end = self.data.geom("s4").xpos.copy()
         pos_r45_right_end = self.data.geom("s5").xpos.copy()
 
-        z = [pos_r01_left_end[-1],pos_r01_right_end[-1],pos_r23_left_end[-1],pos_r23_right_end[-1],pos_r45_left_end[-1],pos_r45_right_end[-1]]
-        #print(z)
-        stability = self.stable(z,threshold=1e-3)
-        #print(stability)
         pos_center = (pos_r01_left_end + pos_r01_right_end + pos_r23_left_end + pos_r23_right_end + pos_r45_left_end + pos_r45_right_end) / 6
 
         pos_rel_s0 = pos_r01_left_end - pos_center # 3
@@ -548,8 +549,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        state = np.concatenate(([stability],pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-        state_with_noise = np.concatenate(([stability],pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
+        if self._use_stability_detection:
+            z_cap = [pos_r01_left_end[-1],pos_r01_right_end[-1],pos_r23_left_end[-1],pos_r23_right_end[-1],pos_r45_left_end[-1],pos_r45_right_end[-1]]
+            stability = self._is_stable(z_cap,threshold=1e-3)
+            state = np.concatenate(([stability],pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
+            state_with_noise = np.concatenate(([stability],pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
+        else:
+            state = np.concatenate((pos_rel_s0, pos_rel_s1, pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
+            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
@@ -640,7 +647,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         return state, observation
 
-    def stable(self,arr, threshold=1e-3):
+    def _is_stable(self,arr, threshold=1e-3):
         if len(arr) < 3:
             return False  
 
@@ -902,8 +909,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         state, observation = self._get_obs()
 
         return state, observation, obs_act_seq
-
-
 
     def viewer_setup(self):
         assert self.viewer is not None

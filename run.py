@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 import time
 
-def train(env, log_dir, model_dir, lr,gre_lr=1e-3, gpu_idx=None, tb_step_recorder="False"):
+def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_recorder="False"):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
