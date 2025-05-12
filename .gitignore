@@ -6,3 +6,4 @@ events.*
 !actors/*.pth
 saved_data/*.ipynb
 group_test_data/*.ipynb
+*.png

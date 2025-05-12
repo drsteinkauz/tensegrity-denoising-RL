@@ -1,6 +1,6 @@
 import ge_sac
 import tr_env_gym
-
+from tensor_buffer import TensorBuffer
 import os
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -165,10 +165,14 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     obs_posi_list = []
     gt_posi_list = []
     predicted_posi_list = []
-
+    tb  = TensorBuffer()
+    tb.to(device)
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float())
+        predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
+        tb.add_tensor(predicted_inheparam)
+        predicted_inheparam = tb.sample()
+        #inheparam_buffer.append(predicted_inheparam)
         feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_inheparam], dim=-1)
         action_scaled, _ = actor.predict(feature)
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
@@ -190,7 +194,7 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
         obs_posi_list.append(obs[:18])
         gt_posi_list.append(state[:18])
 
-        actions_list.append(action_scaled.detach().numpy())
+        actions_list.append(action_scaled)
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
@@ -309,7 +313,7 @@ if __name__ == "__main__":
 
     if(args.test):
         if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
-            gymenv = tr_env_gym.tr_env_gym(render_mode='human',
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         robot_type=robot_type,
                                         is_test = True,
