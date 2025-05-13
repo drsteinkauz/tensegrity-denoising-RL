@@ -45,7 +45,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
         reward_delay_seconds = 0.02, # 0.5,
-        
         contact_with_self_penalty = 0.0,
         robot_type = "w",
         tendon_reset_mean_w = 0.05,
@@ -58,12 +57,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_max_length_j = 0.15,
         tendon_min_length_j = -0.45,
         tendon_max_vel_j = 0.15,
-        friction_noise_range_w = (0.25, 2),
-        damping_noise_range_cross_w = (2.5, 40),
-        stiffness_noise_range_cross_w = (75, 300),
-        friction_noise_range_j = (0.25, 2),
-        damping_noise_range_cross_j = (50, 200),
-        stiffness_noise_range_cross_j = (500, 1000),
+        friction_noise_dist_w = (1.0, 4.0),
+        damping_noise_dist_cross_w = (10.0, 4.0),
+        stiffness_noise_dist_cross_w = (150.0, 2.0),
+        friction_noise_dist_j = (1.0, 4.0),
+        damping_noise_dist_cross_j = (100.0, 4.0),
+        stiffness_noise_dist_cross_j = (700.0, 2.0),
         obs_noise_tendon_stdev_w = 0.02,
         obs_noise_cap_pos_stdev_w = 0.01,
         obs_noise_tendon_stdev_j = 0.02,
@@ -118,12 +117,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tendon_max_length_j,
             tendon_min_length_j,
             tendon_max_vel_j,
-            friction_noise_range_w,
-            damping_noise_range_cross_w,
-            stiffness_noise_range_cross_w,
-            friction_noise_range_j,
-            damping_noise_range_cross_j,
-            stiffness_noise_range_cross_j,
+            friction_noise_dist_w,
+            damping_noise_dist_cross_w,
+            stiffness_noise_dist_cross_w,
+            friction_noise_dist_j,
+            damping_noise_dist_cross_j,
+            stiffness_noise_dist_cross_j,
             obs_noise_tendon_stdev_w,
             obs_noise_cap_pos_stdev_w,
             obs_noise_tendon_stdev_j,
@@ -180,9 +179,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
             self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_w
             self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_w
-            self._friction_noise_range = friction_noise_range_w
-            self._damping_noise_range_cross = damping_noise_range_cross_w
-            self._stiffness_noise_range_cross = stiffness_noise_range_cross_w
+            self._friction_noise_dist = friction_noise_dist_w
+            self._damping_noise_dist_cross = damping_noise_dist_cross_w
+            self._stiffness_noise_dist_cross = stiffness_noise_dist_cross_w
 
             self._iniyaw_bias = iniyaw_bias_w
 
@@ -202,9 +201,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
             self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_j
             self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_j
-            self._friction_noise_range = friction_noise_range_j
-            self._damping_noise_range_cross = damping_noise_range_cross_j
-            self._stiffness_noise_range_cross = stiffness_noise_range_cross_j
+            self._friction_noise_dist = friction_noise_dist_j
+            self._damping_noise_dist_cross = damping_noise_dist_cross_j
+            self._stiffness_noise_dist_cross = stiffness_noise_dist_cross_j
 
             self._iniyaw_bias = iniyaw_bias_j
 
@@ -244,9 +243,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 2 # tracking vector x, y
         
         self.inheparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
-        self.inheparam_range = np.array([[self._friction_noise_range[0], self._friction_noise_range[1]],
-                                         [self._damping_noise_range_cross[0], self._damping_noise_range_cross[1]],
-                                         [self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1]]])
+        self.inheparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
+                                         [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
+                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]]])
         if self._use_inherent_params_dr:
             self.state_shape = obs_shape + self.inheparam_shape
         else:
@@ -637,13 +636,19 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         
         if self._use_inherent_params_dr:
             if self._robot_type == "w":
-                state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
-                                        self.model.tendon_damping[12],  # damping of cross tendon
-                                        self.model.tendon_stiffness[12]])))  # stiffness of cross tendon
+                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
+                log_damping = np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0])
+                log_stiffness = np.log(self.model.tendon_stiffness[12] / self._stiffness_noise_dist_cross[0])
+                state = np.concatenate((state, np.array([log_friction,  # friction coefficient
+                                                         log_damping,  # damping of cross tendon
+                                                         log_stiffness])))  # stiffness of cross tendon
             elif self._robot_type == "j":
-                state = np.concatenate((state, np.array([self.model.geom_friction[0, 0],  # friction coefficient
-                                        self.model.tendon_damping[6],  # damping of cross tendon
-                                        self.model.tendon_stiffness[6]]))) # stiffness of cross tendon
+                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
+                log_damping = np.log(self.model.tendon_damping[6] / self._damping_noise_dist_cross[0])
+                log_stiffness = np.log(self.model.tendon_stiffness[6] / self._stiffness_noise_dist_cross[0])
+                state = np.concatenate((state, np.array([log_friction,  # friction coefficient
+                                                         log_damping,  # damping of cross tendon
+                                                         log_stiffness]))) # stiffness of cross tendon
 
         return state, observation
 
@@ -728,9 +733,13 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return filtered_action
 
     def _reset_inherent_params(self):
-        friction_coeff = np.random.uniform(self._friction_noise_range[0], self._friction_noise_range[1])
-        damping_coeff = np.random.uniform(self._damping_noise_range_cross[0], self._damping_noise_range_cross[1])
-        stiffness_coeff = np.random.uniform(self._stiffness_noise_range_cross[0], self._stiffness_noise_range_cross[1])
+        rand_fric = np.random.uniform(-np.log(self._friction_noise_dist[1]), np.log(self._friction_noise_dist[1]))
+        rand_damp = np.random.uniform(-np.log(self._damping_noise_dist_cross[1]), np.log(self._damping_noise_dist_cross[1]))
+        rand_stiff = np.random.uniform(-np.log(self._stiffness_noise_dist_cross[1]), np.log(self._stiffness_noise_dist_cross[1]))
+
+        friction_coeff = np.exp(rand_fric) * self._friction_noise_dist[0]
+        damping_coeff = np.exp(rand_damp) * self._damping_noise_dist_cross[0]
+        stiffness_coeff = np.exp(rand_stiff) * self._stiffness_noise_dist_cross[0]
 
         if self._robot_type == "w":
             self.model.geom_friction[:, 0] = friction_coeff

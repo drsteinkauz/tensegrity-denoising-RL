@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_range=env.inheparam_range, device=device)
+    agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_dist=env.inheparam_dist, device=device)
 
     agent.lr = lr
     agent.lr_GE = gre_lr

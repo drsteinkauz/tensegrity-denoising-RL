@@ -162,7 +162,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, inheparam_dim, inheparam_range, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, inheparam_dim, inheparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -179,8 +179,7 @@ class SACAgent:
 
         self.inheparam_dim = inheparam_dim
         with torch.no_grad():
-            self.inheparam_mean = torch.tensor((inheparam_range[:,0] + inheparam_range[:,1]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
-            self.inheparam_std = torch.tensor((inheparam_range[:,1] - inheparam_range[:,0]) / 2, dtype=torch.float32, device=self.device).view(1, -1).detach()
+            self.inheparam_std = torch.tensor(inheparam_dist[:,1], dtype=torch.float32, device=self.device).view(1, -1).detach()
             # shape: (1, inheparam_dim)
 
         # self.alpha = 1          # Entropy coefficient # 0.2
@@ -242,8 +241,8 @@ class SACAgent:
         sampled_action, action_log_prob, std = self.actor.sample(feature_batch.detach())
 
         # GRUAutoEncoder update
-        predicted_inheparam_batch_normalized = (predicted_inheparam_batch - self.inheparam_mean) / self.inheparam_std
-        gt_inheparam_batch_normalized = (gt_inheparam_batch - self.inheparam_mean) / self.inheparam_std
+        predicted_inheparam_batch_normalized = predicted_inheparam_batch / self.inheparam_std
+        gt_inheparam_batch_normalized = gt_inheparam_batch / self.inheparam_std
         predict_error = F.mse_loss(predicted_inheparam_batch_normalized, gt_inheparam_batch_normalized)
         predict_loss = 0.5*predict_error
 
