@@ -55,7 +55,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_reset_mean_j = 0.15,
         tendon_reset_stdev_j = 0.2,
         tendon_max_length_j = 0.15,
-        tendon_min_length_j = -0.45,
+        tendon_min_length_j = -0.35,
         tendon_max_vel_j = 0.15,
         friction_noise_dist_w = (1.0, 4.0),
         damping_noise_dist_cross_w = (10.0, 4.0),
@@ -70,7 +70,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         iniyaw_bias_w = -np.pi/15,
         way_pts_range_w = (1.0, 1.0),
         way_pts_angle_range_w = (0.0, 0.0),
-        iniyaw_bias_j = np.pi/15,
+        iniyaw_bias_j = np.pi/10,
         way_pts_range_j = (3.0, 3.0),
         way_pts_angle_range_j = (-np.pi/12, np.pi/12),
         ditch_reward_max=200,
@@ -273,8 +273,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         )
 
     def control_cost(self, action, tendon_length_6):
-        # control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6))
+        if self._robot_type == "j":
+            control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
+        elif self._robot_type == "w":
+            control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6)) # 0.15 is the initial spring length for 6 tendons
         # control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
@@ -340,7 +342,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif self._robot_type == "j":
             self.data.ctrl[:] = action.copy()
             for _ in range(self.frame_skip):
-                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.2 - 1), -4 * np.ones(6))
+                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.17 - 1), -4 * np.ones(6))
                 crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
                 self.model.actuator_forcerange[:, 0] = crt_min_force
                 mujoco.mj_step(self.model, self.data)
