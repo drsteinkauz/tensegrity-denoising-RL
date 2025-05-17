@@ -86,7 +86,7 @@ class PolicyNetwork(nn.Module):
         return super(PolicyNetwork, self).to(device)
     
 class GRUEncoder(nn.Module):
-    def __init__(self, input_dim, feature_dim, hidden_dim=256):
+    def __init__(self, input_dim, feature_dim, hidden_dim=256, scaled_output=False):
         super(GRUEncoder, self).__init__()
         self.gru = nn.GRU(input_dim, hidden_dim, batch_first=True)
         self.encoder = nn.Sequential(
@@ -95,13 +95,19 @@ class GRUEncoder(nn.Module):
             nn.Linear(hidden_dim, feature_dim),
         )
         self.apply(weights_init_)
+        self.scaled_output = scaled_output
 
     def encode(self, x):
         # x: (batch_size, seq_len, input_dim)
         out, hidden_n = self.gru(x)
         last_out = out[:, -1, :]
         feature = self.encoder(last_out)
-        return feature
+        epsilon_tanh = 1e-6
+        feature_scaled = torch.tanh(feature) * (1 - epsilon_tanh)
+        if self.scaled_output:
+            return feature_scaled
+        else:
+            return feature
 
     def forward(self, x):
         # x: (batch_size, seq_len, input_dim)
@@ -176,6 +182,7 @@ class SACAgent:
         self.updates_per_step = 1
         self.warmup_steps = 256
         self.lambda_for_GAE = 0.1
+        self.encoder_scaled_output = False
 
         self.inheparam_dim = inheparam_dim
         with torch.no_grad():
@@ -190,7 +197,7 @@ class SACAgent:
         self.actor = PolicyNetwork(observation_dim+inheparam_dim, action_dim).to(self.device)
         self.critic = QNetwork(state_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.gruencoder = GRUEncoder(observation_dim+action_dim, inheparam_dim).to(self.device)
+        self.gruencoder = GRUEncoder(input_dim=observation_dim+action_dim, feature_dim=inheparam_dim, scaled_output=self.encoder_scaled_output).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -206,7 +213,10 @@ class SACAgent:
     
     def select_action(self, obs_act_seq, observation, state):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
-        predicted_inheparam = self.gruencoder.encode(obs_act_seq)
+        if self.encoder_scaled_output:
+            predicted_inheparam = self.gruencoder.encode(obs_act_seq) * torch.log(self.inheparam_std)
+        else:
+            predicted_inheparam = self.gruencoder.encode(obs_act_seq)
         gt_inheparam = torch.FloatTensor(state[-self.inheparam_dim:]).to(self.device).unsqueeze(0)
         with torch.no_grad():
             # feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), predicted_inheparam], dim=-1)
@@ -234,7 +244,10 @@ class SACAgent:
         
         state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
-        predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch)
+        if self.encoder_scaled_output:
+            predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch) * torch.log(self.inheparam_std)
+        else:
+            predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch)
         gt_inheparam_batch = state_batch[:, -self.inheparam_dim:].detach()
         # feature_batch = torch.cat([observation_batch, predicted_inheparam_batch], dim=-1)
         feature_batch = torch.cat([observation_batch, gt_inheparam_batch], dim=-1)
@@ -261,7 +274,10 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch)
+            if self.encoder_scaled_output:
+                next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch) * torch.log(self.inheparam_std)
+            else:
+                next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch)
             next_gt_inheparam_batch = next_state_batch[:, -self.inheparam_dim:].detach()
             # next_feature_batch = torch.cat([next_observation_batch, next_predicted_inheparam_batch], dim=-1)
             next_feature_batch = torch.cat([next_observation_batch, next_gt_inheparam_batch], dim=-1)
