@@ -59,12 +59,13 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                 action_scaled = agent.select_action(obs_act_seq, observation, state)
             next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
-            next_obs_act_seq = np.concatenate((next_obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
+            next_obs_act_seq = np.concatenate(obs_act_seq[1:], (next_obs_act.reshape(1, -1)), axis=0)
             agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
             info_agent = agent.update()
             
             state = next_state
             observation = next_observation
+            obs_act_seq = next_obs_act_seq
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
             episode_ctrl_reward += info_env["reward_ctrl"]
@@ -137,7 +138,7 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     ge.load_state_dict(ge_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs, obs_act_seq = env.reset()[0]
+    state, obs, obs_act_seq = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -170,18 +171,17 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     iter = int(simulation_seconds/dt)
     for i in range(iter):
         predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
-        tb.add_tensor(predicted_inheparam)
-        predicted_inheparam = tb.sample()
-        #inheparam_buffer.append(predicted_inheparam)
+        # tb.add_tensor(predicted_inheparam)
+        # predicted_inheparam = tb.sample()
+        # gt_inheparam = torch.from_numpy(state[-3:]).detach().float().to(device).unsqueeze(0)
         feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_inheparam], dim=-1)
+        # feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), gt_inheparam], dim=-1)
         action_scaled, _ = actor.predict(feature)
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
-        # action_unscaled = action_scaled.detach() * 0.3 - 0.15
-        action_unscaled = action_scaled * 0.05
         state, obs, _, done, _, info = env.step(action_scaled)
 
         obs_act = np.concatenate((obs, action_scaled))
-        obs_act_seq = np.concatenate((obs_act.reshape(1, -1), obs_act_seq[:-1]), axis=0)
+        obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
 
         predicted_inheparam_numpy = predicted_inheparam.detach().cpu().numpy()
         predicted_friction_list.append(predicted_inheparam_numpy[0][-3])
