@@ -59,7 +59,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                 action_scaled = agent.select_action(obs_act_seq, observation, state)
             next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
-            next_obs_act_seq = np.concatenate(obs_act_seq[1:], (next_obs_act.reshape(1, -1)), axis=0)
+            next_obs_act_seq = np.concatenate((obs_act_seq[1:], next_obs_act.reshape(1, -1)), axis=0)
             agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
             info_agent = agent.update()
             

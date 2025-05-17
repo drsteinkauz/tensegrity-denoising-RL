@@ -241,8 +241,8 @@ class SACAgent:
         sampled_action, action_log_prob, std = self.actor.sample(feature_batch.detach())
 
         # GRUAutoEncoder update
-        predicted_inheparam_batch_normalized = predicted_inheparam_batch / self.inheparam_std
-        gt_inheparam_batch_normalized = gt_inheparam_batch / self.inheparam_std
+        predicted_inheparam_batch_normalized = predicted_inheparam_batch / torch.log(self.inheparam_std)
+        gt_inheparam_batch_normalized = gt_inheparam_batch / torch.log(self.inheparam_std)
         predict_error = F.mse_loss(predicted_inheparam_batch_normalized, gt_inheparam_batch_normalized)
         predict_loss = 0.5*predict_error
 
