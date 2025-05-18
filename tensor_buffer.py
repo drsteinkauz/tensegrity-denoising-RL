@@ -13,7 +13,8 @@ class TensorBuffer:
         """
         if tensor.shape != (1, 3):
             raise ValueError("输入的tensor必须是形状为[1, 3]")
-
+        tensor = torch.clamp(tensor,-2,2)
+        #print("Tensor:",tensor)
         if self.current_size < self.buffer_size:
             # 如果buffer未满，直接在buffer末尾添加
             self.buffer[self.current_size] = tensor
@@ -28,7 +29,9 @@ class TensorBuffer:
         """
         if self.current_size == 0:
             return torch.zeros(1, 3, device=self.device)  # 如果buffer为空，返回全零张量
-        return self.buffer[:self.current_size].mean(dim=0, keepdim=True)
+        exp_mean = self.buffer[:self.current_size].mean(dim=0, keepdim=True)
+        #print("Mean:",exp_mean)
+        return exp_mean
 
     def to(self, device):
         """
