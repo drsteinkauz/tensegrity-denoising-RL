@@ -1,4 +1,4 @@
-import ge_sac
+import gae_sac
 import tr_env_gym
 from tensor_buffer import TensorBuffer
 import os
@@ -16,14 +16,14 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_dist=env.inheparam_dist, device=device)
+    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
 
     agent.lr = lr
     agent.lr_GE = gre_lr
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    TIMESTEPS = 25000
+    TIMESTEPS = 100000
     step_num = 0
     eps_num = 0
 
@@ -56,7 +56,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(obs_act_seq, observation, state)
+                action_scaled = agent.select_action(obs_act_seq, observation)
             next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
             next_obs_act_seq = np.concatenate((obs_act_seq[1:], next_obs_act.reshape(1, -1)), axis=0)
@@ -91,7 +91,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-                torch.save(agent.gruencoder.state_dict(), os.path.join(model_dir, f"gruencoder_{step_num}.pth"))
+                torch.save(agent.gruautoencoder.state_dict(), os.path.join(model_dir, f"gruautoencoder_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
@@ -130,10 +130,10 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
 
 def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = ge_sac.PolicyNetwork(env.observation_space.shape[0]+env.inheparam_shape, env.action_space.shape[0]).to(device)
+    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0]+env.intriparam_shape, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    ge = ge_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.inheparam_shape).to(device)
+    ge = gae_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.intriparam_shape).to(device)
     ge_state_dict = torch.load(path_to_ge, map_location=torch.device(device=device))
     ge.load_state_dict(ge_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
@@ -170,12 +170,12 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     tb.to(device)
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
-        # tb.add_tensor(predicted_inheparam)
-        # predicted_inheparam = tb.sample()
-        # gt_inheparam = torch.from_numpy(state[-3:]).detach().float().to(device).unsqueeze(0)
-        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_inheparam], dim=-1)
-        # feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), gt_inheparam], dim=-1)
+        predicted_intriparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
+        # tb.add_tensor(predicted_intriparam)
+        # predicted_intriparam = tb.sample()
+        # gt_intriparam = torch.from_numpy(state[-3:]).detach().float().to(device).unsqueeze(0)
+        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_intriparam], dim=-1)
+        # feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), gt_intriparam], dim=-1)
         action_scaled, _ = actor.predict(feature)
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
         state, obs, _, done, _, info = env.step(action_scaled)
@@ -183,10 +183,10 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
 
-        predicted_inheparam_numpy = predicted_inheparam.detach().cpu().numpy()
-        predicted_friction_list.append(predicted_inheparam_numpy[0][-3])
-        predicted_damping_c_list.append(predicted_inheparam_numpy[0][-2])
-        predicted_stiffness_c_list.append(predicted_inheparam_numpy[0][-1])
+        predicted_intriparam_numpy = predicted_intriparam.detach().cpu().numpy()
+        predicted_friction_list.append(predicted_intriparam_numpy[0][-3])
+        predicted_damping_c_list.append(predicted_intriparam_numpy[0][-2])
+        predicted_stiffness_c_list.append(predicted_intriparam_numpy[0][-1])
         friction_list.append(state[-3])
         damping_c_list.append(state[-2])
         stiffness_c_list.append(state[-1])

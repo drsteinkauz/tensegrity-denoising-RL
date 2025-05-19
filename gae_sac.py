@@ -85,34 +85,43 @@ class PolicyNetwork(nn.Module):
         self.device = device
         return super(PolicyNetwork, self).to(device)
     
-class GRUEncoder(nn.Module):
-    def __init__(self, input_dim, feature_dim, hidden_dim=256, scaled_output=False):
-        super(GRUEncoder, self).__init__()
+class GRUAutoEncoder(nn.Module):
+    def __init__(self, input_dim, feature_dim, output_dim, hidden_dim=256, decoder_scaled_output=False):
+        super(GRUAutoEncoder, self).__init__()
         self.gru = nn.GRU(input_dim, hidden_dim, batch_first=True)
         self.encoder = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, feature_dim),
         )
+        self.decoder = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
         self.apply(weights_init_)
-        self.scaled_output = scaled_output
+        self.decoder_scaled_output = decoder_scaled_output
+        self.epsilon_tanh = 1e-6
 
     def encode(self, x):
         # x: (batch_size, seq_len, input_dim)
         out, hidden_n = self.gru(x)
         last_out = out[:, -1, :]
         feature = self.encoder(last_out)
-        epsilon_tanh = 1e-6
-        feature_scaled = torch.tanh(feature) * (1 - epsilon_tanh)
-        if self.scaled_output:
-            return feature_scaled
-        else:
-            return feature
+        return feature
+    
+    def decode(self, feature):
+        # feature: (batch_size, feature_dim)
+        decoded = self.decoder(feature)
+        if self.decoder_scaled_output:
+            decoded = torch.tanh(decoded) * (1 - self.epsilon_tanh)
+        return decoded
 
     def forward(self, x):
         # x: (batch_size, seq_len, input_dim)
         feature = self.encode(x)
-        return feature
+        decoded = self.decode(feature)
+        return decoded
 
 # Replay buffer class
 class ReplayBuffer:
@@ -168,7 +177,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, inheparam_dim, inheparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, feature_dim, intriparam_dim, intriparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -182,22 +191,22 @@ class SACAgent:
         self.updates_per_step = 1
         self.warmup_steps = 256
         self.lambda_for_GAE = 0.1
-        self.encoder_scaled_output = False
+        self.decoder_scaled_output = False
 
-        self.inheparam_dim = inheparam_dim
+        self.intriparam_dim = intriparam_dim
         with torch.no_grad():
-            self.inheparam_std = torch.tensor(inheparam_dist[:,1], dtype=torch.float32, device=self.device).view(1, -1).detach()
-            # shape: (1, inheparam_dim)
+            self.intriparam_std = torch.tensor(intriparam_dist[:,1], dtype=torch.float32, device=self.device).view(1, -1).detach()
+            # shape: (1, intriparam_dim)
 
         # self.alpha = 1          # Entropy coefficient # 0.2
         self.log_ent_coef = torch.zeros(1).to(self.device).requires_grad_(True)
         self._target_entropy = -action_dim
         
         # Networks
-        self.actor = PolicyNetwork(observation_dim+inheparam_dim, action_dim).to(self.device)
+        self.actor = PolicyNetwork(observation_dim+feature_dim, action_dim).to(self.device)
         self.critic = QNetwork(state_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.gruencoder = GRUEncoder(input_dim=observation_dim+action_dim, feature_dim=inheparam_dim, scaled_output=self.encoder_scaled_output).to(self.device)
+        self.gruautoencoder = GRUAutoEncoder(input_dim=observation_dim+action_dim, feature_dim=feature_dim, output_dim=intriparam_dim, decoder_scaled_output=self.decoder_scaled_output).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -206,21 +215,16 @@ class SACAgent:
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
-        self.gruencoder_optimizer = optim.Adam(self.gruencoder.parameters(), lr=self.lr_GE)
+        self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GE)
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)
     
-    def select_action(self, obs_act_seq, observation, state):
+    def select_action(self, obs_act_seq, observation):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
-        if self.encoder_scaled_output:
-            predicted_inheparam = self.gruencoder.encode(obs_act_seq) * torch.log(self.inheparam_std)
-        else:
-            predicted_inheparam = self.gruencoder.encode(obs_act_seq)
-        gt_inheparam = torch.FloatTensor(state[-self.inheparam_dim:]).to(self.device).unsqueeze(0)
+        ip_feature = self.gruautoencoder.encode(obs_act_seq)
         with torch.no_grad():
-            # feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), predicted_inheparam], dim=-1)
-            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), gt_inheparam], dim=-1)
+            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), ip_feature], dim=-1)
             action, _, _ = self.actor.sample(feature)
         return action.squeeze(0).cpu().numpy()
     
@@ -244,24 +248,17 @@ class SACAgent:
         
         state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
-        if self.encoder_scaled_output:
-            predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch) * torch.log(self.inheparam_std)
-        else:
-            predicted_inheparam_batch = self.gruencoder.encode(obs_act_seq_batch)
-        gt_inheparam_batch = state_batch[:, -self.inheparam_dim:].detach()
-        # feature_batch = torch.cat([observation_batch, predicted_inheparam_batch], dim=-1)
-        feature_batch = torch.cat([observation_batch, gt_inheparam_batch], dim=-1)
-        sampled_action, action_log_prob, std = self.actor.sample(feature_batch.detach())
+        ip_feature_batch = self.gruautoencoder.encode(obs_act_seq_batch)
+        predicted_intriparam_batch = self.gruautoencoder.decode(ip_feature_batch) * torch.log(self.intriparam_std)
+        gt_intriparam_batch = state_batch[:, -self.intriparam_dim:].detach()
+        feature_batch = torch.cat([observation_batch, ip_feature_batch], dim=-1)
+        sampled_action, action_log_prob, std = self.actor.sample(feature_batch)
 
         # GRUAutoEncoder update
-        predicted_inheparam_batch_normalized = predicted_inheparam_batch / torch.log(self.inheparam_std)
-        gt_inheparam_batch_normalized = gt_inheparam_batch / torch.log(self.inheparam_std)
-        predict_error = F.mse_loss(predicted_inheparam_batch_normalized, gt_inheparam_batch_normalized)
+        predicted_intriparam_batch_normalized = predicted_intriparam_batch / torch.log(self.intriparam_std)
+        gt_intriparam_batch_normalized = gt_intriparam_batch / torch.log(self.intriparam_std)
+        predict_error = F.mse_loss(predicted_intriparam_batch_normalized, gt_intriparam_batch_normalized)
         predict_loss = 0.5*predict_error
-
-        self.gruencoder_optimizer.zero_grad()
-        predict_loss.backward()
-        self.gruencoder_optimizer.step()
         
         # entropy coefficient update
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
@@ -274,13 +271,8 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            if self.encoder_scaled_output:
-                next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch) * torch.log(self.inheparam_std)
-            else:
-                next_predicted_inheparam_batch = self.gruencoder.encode(next_obs_act_seq_batch)
-            next_gt_inheparam_batch = next_state_batch[:, -self.inheparam_dim:].detach()
-            # next_feature_batch = torch.cat([next_observation_batch, next_predicted_inheparam_batch], dim=-1)
-            next_feature_batch = torch.cat([next_observation_batch, next_gt_inheparam_batch], dim=-1)
+            next_ip_feature_batch = self.gruautoencoder.encode(next_obs_act_seq_batch)
+            next_feature_batch = torch.cat([next_observation_batch, next_ip_feature_batch], dim=-1)
             sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_feature_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
@@ -299,8 +291,12 @@ class SACAgent:
         q_value_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
 
+        pa_loss = predict_loss + actor_loss
+
+        self.gruautoencoder_optimizer.zero_grad()
         self.actor_optimizer.zero_grad()
-        actor_loss.backward()
+        pa_loss.backward()
+        self.gruautoencoder_optimizer.step()
         self.actor_optimizer.step()
 
 

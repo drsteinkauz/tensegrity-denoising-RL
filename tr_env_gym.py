@@ -32,7 +32,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_cap_velocity=True,
         use_stability_detection=True,
         use_obs_noise=False,
-        use_inherent_params_dr=True,
+        use_intrinsic_params_dr=True,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -92,7 +92,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             use_cap_velocity,
             use_stability_detection,
             use_obs_noise,
-            use_inherent_params_dr,
+            use_intrinsic_params_dr,
             terminate_when_unhealthy,
             is_test,
             desired_action,
@@ -154,7 +154,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._use_stability_detection = use_stability_detection
 
         self._use_obs_noise = use_obs_noise
-        self._use_inherent_params_dr = use_inherent_params_dr
+        self._use_intrinsic_params_dr = use_intrinsic_params_dr
 
         self._min_reset_heading = min_reset_heading
         self._max_reset_heading = max_reset_heading
@@ -242,12 +242,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif desired_action == "tracking":
             obs_shape += 2 # tracking vector x, y
         
-        self.inheparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
-        self.inheparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
+        self.intriparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
+        self.intriparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
                                          [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
                                          [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]]])
-        if self._use_inherent_params_dr:
-            self.state_shape = obs_shape + self.inheparam_shape
+        if self._use_intrinsic_params_dr:
+            self.state_shape = obs_shape + self.intriparam_shape
         else:
             self.state_shape = obs_shape
 
@@ -636,7 +636,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         else:
             observation = state
         
-        if self._use_inherent_params_dr:
+        if self._use_intrinsic_params_dr:
             if self._robot_type == "w":
                 log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
                 log_damping = np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0])
@@ -732,8 +732,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         filtered_action = last_action + del_action
         return filtered_action
 
-    def _reset_inherent_params(self):
-        rand_ihpr = np.random.uniform(-1, 1, size=(self.inheparam_shape,))
+    def _reset_intrinsic_params(self):
+        rand_ihpr = np.random.uniform(-1, 1, size=(self.intriparam_shape,))
 
         friction_coeff = np.exp(rand_ihpr[0] * np.log(self._friction_noise_dist[1])) * self._friction_noise_dist[0]
         damping_coeff = np.exp(rand_ihpr[1] * np.log(self._damping_noise_dist_cross[1])) * self._damping_noise_dist_cross[0]
@@ -753,8 +753,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     def reset_model(self):
         self._psi_wrap_around_count = 0
 
-        if self._use_inherent_params_dr:
-            self._reset_inherent_params()
+        if self._use_intrinsic_params_dr:
+            self._reset_intrinsic_params()
 
         # '''
         # with rolling noise start
