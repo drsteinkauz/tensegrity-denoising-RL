@@ -17,7 +17,6 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_dist=env.inheparam_dist, device=device)
-
     agent.lr = lr
     agent.lr_GE = gre_lr
     os.makedirs(log_dir, exist_ok=True)
@@ -51,7 +50,8 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             predict_errors = []
 
         start_time = time.time()
-
+        if env._use_stability_detection:
+            stability_cnt = 0
         while True:
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
@@ -69,10 +69,11 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
             episode_ctrl_reward += info_env["reward_ctrl"]
-
+            
             step_num += 1
             episode_len += 1
-
+            if env._use_stability_detection:
+                stability_cnt+=state[0]
             if info_agent is not None:
                 if tb_step_recorder == "True":
                     writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
@@ -93,7 +94,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
                 torch.save(agent.gruencoder.state_dict(), os.path.join(model_dir, f"gruencoder_{step_num}.pth"))
 
-            if done or episode_len >= 5000:
+            if done or episode_len >= 1500:
                 break
 
         end_time = time.time()
@@ -102,8 +103,11 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
         eps_num += 1
         writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
         writer.add_scalar("ep/ep_len", episode_len, eps_num)
-        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
+        writer.add_scalar("ep/RL_learning_rate", agent.lr, eps_num)
+        writer.add_scalar("ep/gre_lr",agent.lr_GE,eps_num)
         writer.add_scalar("ep/train_speed", train_speed, step_num)
+        if env._use_stability_detection:
+            writer.add_scalar("ep/stability_rate",stability_cnt/episode_len,eps_num)
         if tb_step_recorder == "False":
             writer.add_scalar("loss/actor_loss", np.array(actor_losses).mean(), step_num)
             writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
@@ -111,6 +115,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
             writer.add_scalar("loss/predict_loss", np.array(predict_losses).mean(), step_num)
             writer.add_scalar("loss/predict_error", np.array(predict_errors).mean(), step_num)
+            
         writer.flush()
         if tb_step_recorder == "True":
             writer.close()
@@ -285,7 +290,6 @@ if __name__ == "__main__":
     parser.add_argument('--gre_lr', default=1e-3, type=float,
                         help="grelr")
     args = parser.parse_args()
-
     if args.terminate_when_unhealthy == "no":
         terminate_when_unhealthy = False
     else:
@@ -309,7 +313,7 @@ if __name__ == "__main__":
         if args.starting_point and os.path.isfile(args.starting_point):
             train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC,gre_lr =args.gre_lr,  gpu_idx=args.gpu_idx, starting_point= args.starting_point)
         else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC,gre_lr =args.gre_lr, gpu_idx=args.gpu_idx)
 
     if(args.test):
         if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
