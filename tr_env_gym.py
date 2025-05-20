@@ -169,12 +169,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._lin_vel_cmd = np.array([0.0, 0.0])
         self._ang_vel_cmd = 0.0
 
-        if self._robot_type == "w":
-            self._tendon_reset_mean = tendon_reset_mean_w
-            self._tendon_reset_stdev = tendon_reset_stdev_w
-            self._tendon_max_length = tendon_max_length_w
-            self._tendon_min_length = tendon_min_length_w
-            self._tendon_max_vel = tendon_max_vel_w
 
         if self._robot_type == "w":
             self._tendon_reset_mean = tendon_reset_mean_w
@@ -243,8 +237,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 1
         if use_contact_forces:
             obs_shape += 84
-        if use_cap_velocity:
-            obs_shape += 18
         if desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
         elif desired_action == "tracking":
@@ -567,11 +559,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             state = np.concatenate((pos_rel_s0, pos_rel_s1, pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
             state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
-        if self._use_obs_noise == True:
-            observation = state_with_noise
-        else:
-            observation = state
-
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
 
@@ -710,6 +697,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     def _straight_potential(self, xy_position):
         k_ALONG = self._forrew_rate / self.dt
         stdev_BIAS = self._ditch_reward_stdev
+
         odom_position = xy_position - self._oripoint
         distance = np.linalg.norm(odom_position)
         yaw_diff = np.arctan2(odom_position[1], odom_position[0]) - self._reset_psi
