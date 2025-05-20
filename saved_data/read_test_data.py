@@ -7,6 +7,7 @@ action_data = np.load('action_data.npy')
 tendon_data = np.load('tendon_data.npy')
 oript_data = np.load('oript_data.npy')
 iniyaw_data = np.load('iniyaw_data.npy')
+<<<<<<< HEAD
 waypt_data = np.load('waypt_data.npy', allow_pickle=True)
 x_pos_data = np.load('x_pos_data.npy')
 y_pos_data = np.load('y_pos_data.npy')
@@ -22,6 +23,10 @@ obs_posi_data = np.load('obs_posi_data.npy')
 gt_posi_data = np.load('gt_posi_data.npy')
 #predicted_posi_data = np.load('predicted_posi_data.npy')
 
+=======
+x_pos_data = np.load('x_pos_data.npy')
+y_pos_data = np.load('y_pos_data.npy')
+>>>>>>> origin/dev-incorporate-transformer
 
 action_subdata = action_data
 plt.figure(figsize=(12, 4))
@@ -81,23 +86,31 @@ plt.plot(active_tendon_subdata[:,5], marker='.', linestyle='-')
 plt.ylabel('active tendon subdata 5')
 plt.grid()
 
+<<<<<<< HEAD
 plt.tight_layout()
 plt.savefig('saved_plots/tendon_data_subplots.png')
 plt.close()
 
 
 plt.figure(figsize=(5, 5))
+=======
+plt.figure(figsize=(12, 8))
+>>>>>>> origin/dev-incorporate-transformer
 vector_length = 1
 iniyaw = iniyaw_data[0]
 vec_endpt = oript_data + vector_length * np.array([np.cos(iniyaw), np.sin(iniyaw)])
 plt.plot([oript_data[0], vec_endpt[0]], [oript_data[1], vec_endpt[1]], 'r-', label='forward direction')
 plt.scatter([oript_data[0]], [oript_data[1]], color='blue', label='original point')
+<<<<<<< HEAD
 #plt.scatter([waypt_data[0]], [waypt_data[1]], color='green', label='waypoint')
+=======
+>>>>>>> origin/dev-incorporate-transformer
 plt.plot(x_pos_data, y_pos_data, marker='.', linestyle='-')
 plt.axis('equal')
 plt.title('x-y position')
 plt.xlabel('x')
 plt.ylabel('y')
+<<<<<<< HEAD
 plt.legend()
 plt.grid()
 plt.savefig('saved_plots/xy_position_plot.png')
@@ -105,6 +118,12 @@ plt.close()
 
 
 plt.figure(figsize=(12, 4))
+=======
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(12, 8))
+>>>>>>> origin/dev-incorporate-transformer
 reward_forward_subdata = reward_forward_data
 plt.subplot(211)
 plt.plot(reward_forward_subdata, marker='.', linestyle='-')
@@ -115,9 +134,13 @@ plt.subplot(212)
 plt.plot(reward_ctrl_subdata, marker='.', linestyle='-')
 plt.ylabel('reward ctrl subdata')
 plt.grid()
+<<<<<<< HEAD
 plt.tight_layout()
 plt.savefig('saved_plots/reward_data_subplots.png')
 plt.close()
+=======
+plt.show()
+>>>>>>> origin/dev-incorporate-transformer
 print('sum of reward forward: ', np.sum(reward_forward_subdata))
 print('sum of reward ctrl: ', np.sum(reward_ctrl_subdata))
 
