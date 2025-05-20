@@ -6,5 +6,9 @@ events.*
 !actors/*.pth
 saved_data/*.ipynb
 group_test_data/*.ipynb
+
+*.png
+
 models_forward/
 logs_forward/
+

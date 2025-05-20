@@ -1,20 +1,15 @@
 import numpy as np
-
-from gym import utils
-from gym.envs.mujoco import MujocoEnv
-from gym.spaces import Box
+import mujoco
+import glfw
 import os
 from scipy.spatial.transform import Rotation
 from collections import deque
-import mujoco
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
 }
 
-
-class tr_env_gym(MujocoEnv, utils.EzPickle):
-
+class tmp_env:
     metadata = {
         "render_modes": [
             "human",
@@ -27,12 +22,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     def __init__(
         self,
         xml_file=os.path.join(os.getcwd(),"3prism_jonathan_steady_side.xml"),
-        use_contact_forces=False,
-        use_tendon_length=False,
         use_cap_velocity=True,
-        use_stability_detection=True,
-        use_obs_noise=False,
-        use_inherent_params_dr=True,
+        use_obs_noise = False,
+        use_cap_size_noise = False,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -44,104 +36,24 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         reset_noise_scale=0.0, # reset noise is handled in the following 4 variables
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
-        reward_delay_seconds = 0.02, # 0.5,
-        contact_with_self_penalty = 0.0,
-        robot_type = "w",
-        tendon_reset_mean_w = 0.05,
-        tendon_reset_stdev_w = 0.0,
-        tendon_max_length_w = 0.05,
-        tendon_min_length_w = -0.05,
-        tendon_max_vel_w = 0.05,
-        tendon_reset_mean_j = 0.15,
-        tendon_reset_stdev_j = 0.2,
-        tendon_max_length_j = 0.15,
-        tendon_min_length_j = -0.35,
-        tendon_max_vel_j = 0.15,
-        friction_noise_dist_w = (1.0, 4.0),
-        damping_noise_dist_cross_w = (10.0, 4.0),
-        stiffness_noise_dist_cross_w = (150.0, 2.0),
-        friction_noise_dist_j = (1.0, 4.0),
-        damping_noise_dist_cross_j = (100.0, 4.0),
-        stiffness_noise_dist_cross_j = (700.0, 2.0),
-        obs_noise_tendon_stdev_w = 0.02,
-        obs_noise_cap_pos_stdev_w = 0.01,
-        obs_noise_tendon_stdev_j = 0.02,
-        obs_noise_cap_pos_stdev_j = 0.05,
-        iniyaw_bias_w = -np.pi/15,
-        way_pts_range_w = (1.0, 1.0),
-        way_pts_angle_range_w = (0.0, 0.0),
-        iniyaw_bias_j = np.pi/10,
-        way_pts_range_j = (3.0, 3.0),
-        way_pts_angle_range_j = (-np.pi/12, np.pi/12),
-        ditch_reward_max=200,
-        ditch_reward_stdev_w=0.05,
-        ditch_reward_stdev_j=0.15,
-        waypt_reward_amplitude=50,
-        waypt_reward_stdev_w=0.03,
-        waypt_reward_stdev_j=0.1,
+        tendon_reset_mean = 0.15,
+        tendon_reset_stdev = 0.2,
+        tendon_max_length = 0.15,
+        tendon_min_length = -0.45,
+        reward_delay_seconds = 0.02, # 0.5
+        obs_noise_tendon_stdev = 0.02,
+        obs_noise_cap_pos_stdev = 0.05,
+        cap_size_noise_range = (0.04, 0.09),
+        way_pts_range = (2.5, 3.5),
+        way_pts_angle_range = (-np.pi/6, np.pi/6),
         threshold_waypt = 0.05,
-        forrew_rate_w=3.0,
-        forrew_rate_j=1.0,
+        ditch_reward_max=300,
+        ditch_reward_stdev=0.15,
+        waypt_reward_amplitude=100,
+        waypt_reward_stdev=0.10,
+        yaw_reward_weight=1,
         **kwargs
     ):
-        utils.EzPickle.__init__(
-            self,
-            xml_file,
-            use_contact_forces,
-            use_tendon_length,
-            use_cap_velocity,
-            use_stability_detection,
-            use_obs_noise,
-            use_inherent_params_dr,
-            terminate_when_unhealthy,
-            is_test,
-            desired_action,
-            desired_direction,
-            ctrl_cost_weight,
-            contact_cost_weight,
-            healthy_reward,
-            contact_force_range,
-            reset_noise_scale,
-            min_reset_heading,
-            max_reset_heading,
-            reward_delay_seconds,
-            contact_with_self_penalty,
-            robot_type,
-            tendon_reset_mean_w,
-            tendon_reset_stdev_w,
-            tendon_max_length_w,
-            tendon_min_length_w,
-            tendon_max_vel_w,
-            tendon_reset_mean_j,
-            tendon_reset_stdev_j,
-            tendon_max_length_j,
-            tendon_min_length_j,
-            tendon_max_vel_j,
-            friction_noise_dist_w,
-            damping_noise_dist_cross_w,
-            stiffness_noise_dist_cross_w,
-            friction_noise_dist_j,
-            damping_noise_dist_cross_j,
-            stiffness_noise_dist_cross_j,
-            obs_noise_tendon_stdev_w,
-            obs_noise_cap_pos_stdev_w,
-            obs_noise_tendon_stdev_j,
-            obs_noise_cap_pos_stdev_j,
-            iniyaw_bias_w,
-            way_pts_range_w,
-            way_pts_angle_range_w,
-            iniyaw_bias_j,
-            way_pts_range_j,
-            way_pts_angle_range_j,
-            ditch_reward_max,
-            ditch_reward_stdev_w,
-            ditch_reward_stdev_j,
-            waypt_reward_amplitude,
-            waypt_reward_stdev_w,
-            waypt_reward_stdev_j,
-            threshold_waypt,
-            **kwargs
-        )
         self._x_velocity = 1
         self._y_velocity = 1
         self._is_test = is_test
@@ -149,79 +61,35 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._desired_direction = desired_direction
         self._reset_psi = 0
         self._psi_wrap_around_count = 0
-        self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
-        self._use_stability_detection = use_stability_detection
-
-        self._use_obs_noise = use_obs_noise
-        self._use_inherent_params_dr = use_inherent_params_dr
-
-        self._min_reset_heading = min_reset_heading
-        self._max_reset_heading = max_reset_heading
-        self._robot_type = robot_type
         
-        self._oripoint = None
+        self._oripoint = np.array([0.0, 0.0])
+        self._waypt_range = way_pts_range
+        self._waypt_angle_range = way_pts_angle_range
         self._threshold_waypt = threshold_waypt
         self._ditch_reward_max = ditch_reward_max
+        self._ditch_reward_stdev = ditch_reward_stdev
         self._waypt_reward_amplitude = waypt_reward_amplitude
-        self._waypt = None
+        self._waypt_reward_stdev = waypt_reward_stdev
+        self._yaw_reward_weight = yaw_reward_weight
+        self._waypt = np.array([])
 
         self._lin_vel_cmd = np.array([0.0, 0.0])
         self._ang_vel_cmd = 0.0
 
-        if self._robot_type == "w":
-            self._tendon_reset_mean = tendon_reset_mean_w
-            self._tendon_reset_stdev = tendon_reset_stdev_w
-            self._tendon_max_length = tendon_max_length_w
-            self._tendon_min_length = tendon_min_length_w
-            self._tendon_max_vel = tendon_max_vel_w
 
-        if self._robot_type == "w":
-            self._tendon_reset_mean = tendon_reset_mean_w
-            self._tendon_reset_stdev = tendon_reset_stdev_w
-            self._tendon_max_length = tendon_max_length_w
-            self._tendon_min_length = tendon_min_length_w
-            self._tendon_max_vel = tendon_max_vel_w
+        self._use_obs_noise = use_obs_noise
+        self._obs_noise_tendon_stdev = obs_noise_tendon_stdev
+        self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev
+        self._use_cap_size_noise = use_cap_size_noise
+        self._cap_size_noise_range = cap_size_noise_range
 
-            self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_w
-            self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_w
-            self._friction_noise_dist = friction_noise_dist_w
-            self._damping_noise_dist_cross = damping_noise_dist_cross_w
-            self._stiffness_noise_dist_cross = stiffness_noise_dist_cross_w
-
-            self._iniyaw_bias = iniyaw_bias_w
-
-            self._waypt_range = way_pts_range_w
-            self._waypt_angle_range = way_pts_angle_range_w
-            self._ditch_reward_stdev = ditch_reward_stdev_w
-            self._waypt_reward_stdev = waypt_reward_stdev_w
-
-            self._forrew_rate = forrew_rate_w
-
-        elif self._robot_type == "j":
-            self._tendon_reset_mean = tendon_reset_mean_j
-            self._tendon_reset_stdev = tendon_reset_stdev_j
-            self._tendon_max_length = tendon_max_length_j
-            self._tendon_min_length = tendon_min_length_j
-            self._tendon_max_vel = tendon_max_vel_j
-
-            self._obs_noise_tendon_stdev = obs_noise_tendon_stdev_j
-            self._obs_noise_cap_pos_stdev = obs_noise_cap_pos_stdev_j
-            self._friction_noise_dist = friction_noise_dist_j
-            self._damping_noise_dist_cross = damping_noise_dist_cross_j
-            self._stiffness_noise_dist_cross = stiffness_noise_dist_cross_j
-
-            self._iniyaw_bias = iniyaw_bias_j
-
-            self._waypt_range = way_pts_range_j
-            self._waypt_angle_range = way_pts_angle_range_j
-            self._ditch_reward_stdev = ditch_reward_stdev_j
-            self._waypt_reward_stdev = waypt_reward_stdev_j
-
-            self._forrew_rate = forrew_rate_j
-
-        else:
-            raise ValueError("robot_type should be either w or j")
+        self._min_reset_heading = min_reset_heading
+        self._max_reset_heading = max_reset_heading
+        self._tendon_reset_mean = tendon_reset_mean
+        self._tendon_reset_stdev = tendon_reset_stdev
+        self._tendon_max_length = tendon_max_length
+        self._tendon_min_length = tendon_min_length
 
         self._healthy_reward = healthy_reward
         self._terminate_when_unhealthy = terminate_when_unhealthy
@@ -232,44 +100,55 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if self._desired_action == "turn":
             self._contact_force_range = (-1000.0, 1000.0)
         self._reset_noise_scale = reset_noise_scale
-        self._use_contact_forces = use_contact_forces
 
-        self._contact_with_self_penalty = contact_with_self_penalty
-
-        obs_shape = 18
-        if use_tendon_length:
-            obs_shape += 9
-        if use_stability_detection:
-            obs_shape += 1
-        if use_contact_forces:
-            obs_shape += 84
+        obs_shape = 27
         if use_cap_velocity:
             obs_shape += 18
-        if desired_action == "vel_track":
+        if desired_action == "tracking" or desired_action == "aiming" or desired_action == "vel_track":
             obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
-        elif desired_action == "tracking":
-            obs_shape += 2 # tracking vector x, y
-        
-        self.inheparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
-        self.inheparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
-                                         [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
-                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]]])
-        if self._use_inherent_params_dr:
-            self.state_shape = obs_shape + self.inheparam_shape
-        else:
-            self.state_shape = obs_shape
 
-        if use_cap_velocity:
-            self.state_shape += 18
-            obs_shape += 18
+        obs_shape -= 9
 
-        observation_space = Box(
-            low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
-        )
+        observation_space = np.zeros(obs_shape)
         frame_skip = 20
-        MujocoEnv.__init__(
-            self, xml_file, frame_skip, observation_space=observation_space, **kwargs
-        )
+
+        self.width = 480
+        self.height = 480
+
+        self.model = mujoco.MjModel.from_xml_path(xml_file)
+        self.model.vis.global_.offwidth = self.width
+        self.model.vis.global_.offheight = self.height
+        self.data = mujoco.MjData(self.model)
+
+        self.init_qpos = self.data.qpos.ravel().copy()
+        self.init_qvel = self.data.qvel.ravel().copy()
+        self._viewers = {}
+
+        self.frame_skip = frame_skip
+        self.dt = self.model.opt.timestep * self.frame_skip
+
+        self.viewer = None
+
+        assert self.metadata["render_modes"] == [
+            "human",
+            "rgb_array",
+            "depth_array",
+        ], self.metadata["render_modes"]
+        assert (
+            int(np.round(1.0 / self.dt)) == self.metadata["render_fps"]
+        ), f'Expected value: {int(np.round(1.0 / self.dt))}, Actual value: {self.metadata["render_fps"]}'
+        
+        self.render_mode = None
+        self.camera_name = None
+        if self._is_test:
+            self.render_mode = "human"
+            self.camera_name = "track"
+
+        self.observation_space = observation_space
+        bounds = self.model.actuator_ctrlrange.copy().astype(np.float32)
+        low_b, high_b = bounds.T
+        self.action_space = np.zeros_like(high_b)
+
         self._reward_delay_steps = int(reward_delay_seconds/self.dt)
         self._heading_buffer = deque()
 
@@ -281,10 +160,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         )
 
     def control_cost(self, action, tendon_length_6):
-        if self._robot_type == "j":
-            control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
-        elif self._robot_type == "w":
-            control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.15 - tendon_length_6)) # 0.15 is the initial spring length for 6 tendons
+        control_cost = self._ctrl_cost_weight * np.sum(np.square(action + 0.5 - tendon_length_6)) # 0.5 is the initial spring length for 6 tendons
         # control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
         return control_cost
 
@@ -304,8 +180,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
     @property
     def is_healthy(self):
-        state = self.state_vector()
-        if self._desired_action == "turn":
+        state = np.concatenate([self.data.qpos.flat, self.data.qvel.flat])
+        if self._desired_action == "turn" or self._desired_action == "aiming":
             bar_speeds = np.abs(state[21:])
             min_velocity = 0.1
             is_healthy = np.isfinite(state).all() and (np.any(bar_speeds > min_velocity) )    
@@ -314,7 +190,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             min_velocity = 0.0001
             is_healthy = np.isfinite(state).all() and ((self._x_velocity > min_velocity or self._x_velocity < -min_velocity) \
                                                         or (self._y_velocity > min_velocity or self._y_velocity < -min_velocity) )
-            
         
         return is_healthy
 
@@ -323,13 +198,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         terminated = not self.is_healthy if self._terminate_when_unhealthy else False
         return terminated
 
-    def step(self, action_scaled):
-        # action: [-1, 1] -> [tendon_min_length, tendon_max_length]
-        action = action_scaled * (self._tendon_max_length - self._tendon_min_length) / 2 + (self._tendon_max_length + self._tendon_min_length) / 2
+    def step(self, action):
         
-        xy_position_before = (self.get_body_com("r01_body")[:2].copy() + \
-                            self.get_body_com("r23_body")[:2].copy() + \
-                            self.get_body_com("r45_body")[:2].copy())/3
+        xy_position_before = (self.data.body("r01_body").xpos[:2].copy() + \
+                            self.data.body("r23_body").xpos[:2].copy() + \
+                            self.data.body("r45_body").xpos[:2].copy())/3
         
         pos_r01_left_end = self.data.geom("s0").xpos.copy()
         pos_r23_left_end = self.data.geom("s2").xpos.copy()
@@ -344,21 +217,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         psi_before = np.arctan2(-orientation_vector_before[0], orientation_vector_before[1])
 
         filtered_action = self._action_filter(action, self.data.ctrl[:].copy())
-        # self.do_simulation(filtered_action, self.frame_skip)
-        if self._robot_type == "w":
-            self.do_simulation(action, self.frame_skip)
-        elif self._robot_type == "j":
-            self.data.ctrl[:] = action.copy()
-            for _ in range(self.frame_skip):
-                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.17 - 1), -4 * np.ones(6))
-                crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
-                self.model.actuator_forcerange[:, 0] = crt_min_force
-                mujoco.mj_step(self.model, self.data)
-            mujoco.mj_rnePostConstraint(self.model, self.data)
         
-        xy_position_after = (self.get_body_com("r01_body")[:2].copy() + \
-                            self.get_body_com("r23_body")[:2].copy() + \
-                            self.get_body_com("r45_body")[:2].copy())/3
+        self.data.ctrl[:] = filtered_action
+        mujoco.mj_step(self.model, self.data, nstep=self.frame_skip)
+        mujoco.mj_rnePostConstraint(self.model, self.data)
+
+        xy_position_after = (self.data.body("r01_body").xpos[:2].copy() + \
+                            self.data.body("r23_body").xpos[:2].copy() + \
+                            self.data.body("r45_body").xpos[:2].copy())/3
 
         xy_velocity = (xy_position_after - xy_position_before) / self.dt
         self._x_velocity, self._y_velocity = xy_velocity
@@ -381,7 +247,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_length = np.array(self.data.ten_length)
         tendon_length_6 = tendon_length[:6]
 
-        state, observation = self._get_obs()
+        observation, observation_with_noise = self._get_obs()
 
 
         if self._desired_action == "turn":
@@ -416,28 +282,45 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         elif self._desired_action == "straight":
             
-            # psi_movement = np.arctan2(y_position_after-y_position_before, x_position_after-x_position_before)
+            psi_movement = np.arctan2(y_position_after-y_position_before, x_position_after-x_position_before)
 
-            # psi_diff = np.abs(psi_movement-self._reset_psi)
+            psi_diff = np.abs(psi_movement-self._reset_psi)
 
-            # forward_reward = self._desired_direction*\
-            #                     (np.sqrt((x_position_after-x_position_before)**2 + \
-            #                             (y_position_after - y_position_before)**2) *\
-            #                     np.cos(psi_diff)/ self.dt) * self._forrew_rate
-
-            before_potential = self._straight_potential(xy_position_before)
-            after_potential = self._straight_potential(xy_position_after)
-            forward_reward = after_potential - before_potential
+            forward_reward = self._desired_direction*\
+                                (np.sqrt((x_position_after-x_position_before)**2 + \
+                                        (y_position_after - y_position_before)**2) *\
+                                np.cos(psi_diff)/ self.dt)
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
             if self._terminate_when_unhealthy:
-                # healthy_reward = self.healthy_reward
-                healthy_reward = 0
+                healthy_reward = self.healthy_reward
             else:
                 healthy_reward = 0
             
             terminated = self.terminated
+
+        elif self._desired_action == "aiming":
+            target_direction = self._waypt - xy_position_before
+            target_direction = target_direction / np.linalg.norm(target_direction)
+            target_psi = np.arctan2(target_direction[1], target_direction[0])
+            new_psi_rbt_tgt = self._angle_normalize(target_psi - psi_after)
+            self._heading_buffer.append(new_psi_rbt_tgt)
+            if len(self._heading_buffer) > self._reward_delay_steps:
+                old_psi_rbt_tgt = self._heading_buffer.popleft()
+                delta_psi = -(np.abs(new_psi_rbt_tgt) - np.abs(old_psi_rbt_tgt)) / (self.dt*self._reward_delay_steps)
+                forward_reward = delta_psi * self._yaw_reward_weight
+            else:
+                delta_psi = 0
+                forward_reward = 0
+            
+            costs = ctrl_cost = self.control_cost(action, tendon_length_6)
+            
+            healthy_reward = 0
+            
+            terminated = self.terminated  
+            if self._step_num > 1000:
+                terminated = True
         
         elif self._desired_action == "tracking":
             # ditch tracking reward
@@ -450,15 +333,13 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1500:
-                terminated = True
-            if np.linalg.norm(xy_position_after - self._waypt) < self._threshold_waypt:
+            if self._step_num > 1000:
                 terminated = True
         
         elif self._desired_action == "vel_tracking":
             ang_vel_bwd = self._angle_normalize(psi_after - psi_before)/self.dt
             vel_bwd = np.array([self._x_velocity, self._y_velocity, ang_vel_bwd])
-            vel_cmd = state[-3:]
+            vel_cmd = observation[-3:]
             forward_reward = self._vel_track_rew(vel_cmd=vel_cmd, vel_bwd=vel_bwd)
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
@@ -496,23 +377,20 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             "waypt": self._waypt,
             "oripoint": self._oripoint,
         }
-        if self._use_contact_forces:
-            contact_cost = self.contact_cost
-            costs += contact_cost
-            info["reward_ctrl"] = -contact_cost
 
         reward = rewards - costs #- contact_with_self_cost
 
         self._step_num += 1
 
         if self.render_mode == "human":
-            self.render()
-        
-        return state, observation, reward, terminated, False, info
-
+            self._render()
+        # if self._use_obs_noise == False:
+        #     return observation, reward, terminated, False, info
+        # else:
+        #     return observation_with_noise, reward, terminated, False, info
+        return observation, observation_with_noise, reward, terminated, False, info
+    
     def _get_obs(self):
-        
-        
         """ rotation_r01 = Rotation.from_matrix(self.data.geom("r01").xmat.reshape(3,3)).as_quat() # 4
         rotation_r23 = Rotation.from_matrix(self.data.geom("r23").xmat.reshape(3,3)).as_quat() # 4
         rotation_r45 = Rotation.from_matrix(self.data.geom("r45").xmat.reshape(3,3)).as_quat() # 4 """
@@ -558,20 +436,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        if self._use_stability_detection:
-            z_cap = [pos_r01_left_end[-1],pos_r01_right_end[-1],pos_r23_left_end[-1],pos_r23_right_end[-1],pos_r45_left_end[-1],pos_r45_right_end[-1]]
-            stability = self._is_stable(z_cap,threshold=1e-3)
-            state = np.concatenate(([stability],pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-            state_with_noise = np.concatenate(([stability],pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
-        else:
-            state = np.concatenate((pos_rel_s0, pos_rel_s1, pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
+        observation = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
+                                    tendon_lengths))
+        observation_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+                                    tendon_lengths_with_noise))
         
-        if self._use_obs_noise == True:
-            observation = state_with_noise
-        else:
-            observation = state
-
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
 
@@ -609,16 +478,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             random = rng.standard_normal(size=3)
             vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
 
-            state = np.concatenate((state,\
+            # observation = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
+            #                             vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5,\
+            #                             tendon_lengths))
+            # observation_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
+            #                             vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise,\
+            #                             tendon_lengths_with_noise))
+            observation = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5,\
                                         vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
-            state_with_noise = np.concatenate((state,\
+            observation_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise,\
                                         vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
-            
-        if self._use_tendon_length:
-            state = np.concatenate((state, tendon_lengths))
-            state_with_noise = np.concatenate((state_with_noise, tendon_lengths_with_noise))
 
-        if self._desired_action == "tracking":
+        if self._desired_action == "tracking" or self._desired_action == "aiming":
             tracking_vec = self._waypt - pos_center[:2]
             tgt_drct = tracking_vec / np.linalg.norm(tracking_vec)
             pos_center_noise_del = (pos_rel_s0_with_noise + pos_rel_s1_with_noise + pos_rel_s2_with_noise + pos_rel_s3_with_noise + pos_rel_s4_with_noise + pos_rel_s5_with_noise)/6
@@ -628,55 +499,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tgt_yaw = np.array([np.arctan2(tgt_drct[1], tgt_drct[0])])
             tgt_yaw_with_noise = np.array([np.arctan2(tgt_drct_with_noise[1], tgt_drct_with_noise[0])])
 
-            if np.linalg.norm(tracking_vec) < 1.0:
-                state = np.concatenate((state,\
-                                            tracking_vec))
-                state_with_noise = np.concatenate((state_with_noise,\
-                                                        tracking_vec_with_noise))
-            else:
-                state = np.concatenate((state,\
-                                            tgt_drct))
-                state_with_noise = np.concatenate((state_with_noise,\
-                                                        tgt_drct_with_noise))
+            observation = np.concatenate((observation,\
+                                          tracking_vec, tgt_yaw))
+            observation_with_noise = np.concatenate((observation_with_noise,\
+                                                     tracking_vec_with_noise, tgt_yaw_with_noise))
         
-        elif self._desired_action == "vel_track":
+        if self._desired_action == "vel_track":
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
-            state = np.concatenate((state, vel_cmd))
-            state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-        
-        if self._use_obs_noise == True:
-            observation = state_with_noise
-        else:
-            observation = state
-        
-        if self._use_inherent_params_dr:
-            if self._robot_type == "w":
-                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-                log_damping = np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0])
-                log_stiffness = np.log(self.model.tendon_stiffness[12] / self._stiffness_noise_dist_cross[0])
-            elif self._robot_type == "j":
-                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-                log_damping = np.log(self.model.tendon_damping[6] / self._damping_noise_dist_cross[0])
-                log_stiffness = np.log(self.model.tendon_stiffness[6] / self._stiffness_noise_dist_cross[0])
-            
-            state = np.concatenate((state, np.array([log_friction,  # friction coefficient
-                                                     log_damping,  # damping of cross tendon
-                                                     log_stiffness]))) # stiffness of cross tendon
+            observation = np.concatenate((observation, vel_cmd))
+            observation_with_noise = np.concatenate((observation_with_noise, vel_cmd))
 
-        return state, observation
-
-    def _is_stable(self,arr, threshold=1e-3):
-        if len(arr) < 3:
-            return False  
-
-        sorted_arr = sorted(arr)
-        min1, min2, min3 = sorted_arr[0], sorted_arr[1], sorted_arr[2]
-
-        if abs(min1 - min3) < threshold:
-            return 1
-        else:
-            return 0
-
+        return observation, observation_with_noise
+    
     def _angle_normalize(self, theta):
         if theta > np.pi:
             return self._angle_normalize(theta - 2 * np.pi)
@@ -692,34 +526,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         tracking_vec = self._waypt - xy_position
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
-        # dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+        dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm)
 
-        # ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
-        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        # if self._robot_type == "w":
-        #     center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
-
-        #     ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
-        #     waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+        ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
         waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
         return ditch_rew+waypt_rew
-    
-    def _straight_potential(self, xy_position):
-        k_ALONG = self._forrew_rate / self.dt
-        stdev_BIAS = self._ditch_reward_stdev
-        odom_position = xy_position - self._oripoint
-        distance = np.linalg.norm(odom_position)
-        yaw_diff = np.arctan2(odom_position[1], odom_position[0]) - self._reset_psi
-        yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))
-
-        distance_along = distance * np.cos(yaw_diff)
-        distance_bias = np.abs(distance * np.sin(yaw_diff))
-
-        potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
-        return potential
     
     def _vel_track_rew(self, vel_cmd, vel_bwd):
         track_stdev = np.array([5.0, 7.0])
@@ -733,40 +544,100 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return lin_track_rew + ang_track_rew
     
     def _action_filter(self, action, last_action):
-        k_FILTER = 1.0
-        vel_constraint = self._tendon_max_vel
-
-        del_action = np.clip(action - last_action, -vel_constraint*self.dt, vel_constraint*self.dt)
-        # del_action = np.clip(k_FILTER*(action - last_action)*self.dt, -vel_constraint*self.dt, vel_constraint*self.dt)
-        # del_action = k_FILTER*(action - last_action)*self.dt
-        # del_action = action / 0.05 * vel_constraint*self.dt
-
-        filtered_action = last_action + del_action
+        k_FILTER = 1
+        filtered_action = last_action + k_FILTER*(action - last_action)*self.dt
         return filtered_action
 
-    def _reset_inherent_params(self):
-        rand_ihpr = np.random.uniform(-1, 1, size=(self.inheparam_shape,))
+    def _reset_cap_size(self, noise_range):
+        cap_size_noise_low, cap_size_noise_high = noise_range
+        cap_size = np.random.uniform(low=cap_size_noise_low, high=cap_size_noise_high)
 
-        friction_coeff = np.exp(rand_ihpr[0] * np.log(self._friction_noise_dist[1])) * self._friction_noise_dist[0]
-        damping_coeff = np.exp(rand_ihpr[1] * np.log(self._damping_noise_dist_cross[1])) * self._damping_noise_dist_cross[0]
-        stiffness_coeff = np.exp(rand_ihpr[2] * np.log(self._stiffness_noise_dist_cross[1])) * self._stiffness_noise_dist_cross[0]
+        for i in range(self.model.ngeom):
+            geom_name = self.model.geom_names[i].decode('utf-8')
+            print(f"Index: {i}, Name: {geom_name}")
 
-        if self._robot_type == "w":
-            self.model.geom_friction[:, 0] = friction_coeff
-            self.model.tendon_damping[12:15] = damping_coeff
-            self.model.tendon_stiffness[12:15] = stiffness_coeff
-        elif self._robot_type == "j":
-            self.model.geom_friction[:, 0] = friction_coeff
-            self.model.tendon_damping[6:9] = damping_coeff
-            self.model.tendon_stiffness[6:9] = stiffness_coeff
+        cap_0_id = self.model.geom_name2id('s0')
+        cap_1_id = self.model.geom_name2id('s1')
+        cap_2_id = self.model.geom_name2id('s2')
+        cap_3_id = self.model.geom_name2id('s3')
+        cap_4_id = self.model.geom_name2id('s4')
+        cap_5_id = self.model.geom_name2id('s5')
+
+        self.model.geom_size[cap_0_id] = cap_size
+        self.model.geom_size[cap_1_id] = cap_size
+        self.model.geom_size[cap_2_id] = cap_size
+        self.model.geom_size[cap_3_id] = cap_size
+        self.model.geom_size[cap_4_id] = cap_size
+        self.model.geom_size[cap_5_id] = cap_size
         return
+        
+    def _render(self):
+        if not hasattr(self, "_glfw_window"):
+            # Initialize GLFW
+            if not glfw.init():
+                raise Exception("GLFW initialization failed")
 
+            # Create a GLFW window
+            self._glfw_window = glfw.create_window(800, 600, "MuJoCo Simulation", None, None)
+            if not self._glfw_window:
+                glfw.terminate()
+                raise Exception("GLFW window creation failed")
 
-    def reset_model(self):
+            glfw.make_context_current(self._glfw_window)
+
+            # Initialize Mujoco visualization objects
+            self._mjv_camera = mujoco.MjvCamera()
+            self._mjv_scene = mujoco.MjvScene(self.model, maxgeom=1000)
+            self._mjr_context = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_150)
+
+            # Select a specific camera if camera_name is provided
+            # if self.camera_name in self.model._camera_name2id:
+            #     camera_id = self.model.camera_name2id(self.camera_name)
+            #     self._mjv_camera.type = mujoco.mjtCamera.mjCAMERA_FIXED
+            #     self._mjv_camera.fixedcamid = camera_id
+            # else:
+            #     # Use the free camera if no specific camera is provided
+            #     self._mjv_camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+            self._mjv_camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+
+        # Make the context current
+        glfw.make_context_current(self._glfw_window)
+
+        # Update the scene
+        mujoco.mjv_updateScene(
+            self.model,
+            self.data,
+            mujoco.MjvOption(),
+            mujoco.MjvPerturb(),
+            self._mjv_camera,
+            mujoco.mjtCatBit.mjCAT_ALL.value,
+            self._mjv_scene
+        )
+
+        # Get the framebuffer size
+        width, height = glfw.get_framebuffer_size(self._glfw_window)
+
+        # Render the scene
+        mujoco.mjr_render(
+            mujoco.MjrRect(0, 0, width, height),
+            self._mjv_scene,
+            self._mjr_context
+        )
+
+        # Swap buffers and poll events
+        glfw.swap_buffers(self._glfw_window)
+        glfw.poll_events()
+
+        # Check if the window should close
+        if glfw.window_should_close(self._glfw_window):
+            glfw.terminate()
+            del self._glfw_window
+
+    def _reset_model(self):
         self._psi_wrap_around_count = 0
 
-        if self._use_inherent_params_dr:
-            self._reset_inherent_params()
+        if self._use_cap_size_noise == True:
+            self._reset_cap_size(self._cap_size_noise_range)
 
         # '''
         # with rolling noise start
@@ -776,22 +647,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         # rolling_qpos = [[0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166, 0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359, 0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352],
         #                 [0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359, 0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352, 0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166],
         #                 [0.04557825, -0.29876206, 0.39531985, -0.35798606, -0.47531391, 0.72471075, 0.34744352, 0.08369179, -0.28792231, 0.24830847, -0.49145555, 0.7539914, -0.27511722, -0.33805166, 0.14497616, -0.19291743, 0.35052097, -0.84766041, 0.27950622, 0.45085889, 0.00862359]]
-        if self._robot_type == "j":
-            rolling_qpos = [[0.07900689, -0.32670045,  0.23079722,  0.49365198, -0.74001353,  0.26668361,  0.37090101,  0.13713385, -0.24342633,  0.32722167,  0.82936968, -0.31256817, -0.46189217, -0.03320677,  0.04903377, -0.3421725,   0.36675097,  0.33407281,  0.43794432, -0.72515863, -0.41321313],
-                            [0.15521685, -0.20651043,  0.38922255,  0.85639289, -0.26723449, -0.44110818, -0.02450564,  0.02999107, -0.33576412,  0.43868814,  0.33839518,  0.48544838, -0.73094128, -0.33993149,  0.08083394, -0.31942006,  0.25783949,  0.51726058, -0.74281033,  0.29432583,  0.30667022],
-                            [0.02985312, -0.33588999,  0.43866597,  0.33840617,  0.48522953, -0.73107566, -0.33994403,  0.08072907, -0.31942136,  0.25766037,  0.51740763, -0.74276722,  0.29421311,  0.30663471,  0.15537661, -0.20664637,  0.38923648,  0.85640002, -0.26722239, -0.44110397, -0.02446392],
-                            [0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277],
-                            [0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798],
-                            [0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067]]
-        elif self._robot_type == "w":
-            rolling_qpos = [[0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355],
-                            [0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013,  0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669],
-                            [0.24824598, -0.2435365,   0.06010128,  0.12428316,  0.77737256,  0.16439319, -0.59432355,  0.2438013,  -0.23055046,  0.10995744,  0.46165276, -0.61078778, -0.64202933, -0.04016669,  0.23304155, -0.2781429,   0.0948906,   0.57252615,  0.17486495, -0.48006247, -0.64123013],
-                            [0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358],
-                            [0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532,  0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894],
-                            [0.26630231, -0.21850045,  0.0587917,   0.23642237,  0.60691942,  0.06582413, -0.75592358,  0.28037913, -0.18814138,  0.09807932,  0.45868198, -0.67775281, -0.53799085,  0.20205894,  0.26823767, -0.23681522,  0.1067152,   0.6793826,  -0.07348068, -0.46833013, -0.56009532]]
-        else:
-            raise ValueError("Robot type not supported")
+        rolling_qpos = [[0.07900689, -0.32670045,  0.23079722,  0.49365198, -0.74001353,  0.26668361,  0.37090101,  0.13713385, -0.24342633,  0.32722167,  0.82936968, -0.31256817, -0.46189217, -0.03320677,  0.04903377, -0.3421725,   0.36675097,  0.33407281,  0.43794432, -0.72515863, -0.41321313],
+                        [0.15521685, -0.20651043,  0.38922255,  0.85639289, -0.26723449, -0.44110818, -0.02450564,  0.02999107, -0.33576412,  0.43868814,  0.33839518,  0.48544838, -0.73094128, -0.33993149,  0.08083394, -0.31942006,  0.25783949,  0.51726058, -0.74281033,  0.29432583,  0.30667022],
+                        [0.02985312, -0.33588999,  0.43866597,  0.33840617,  0.48522953, -0.73107566, -0.33994403,  0.08072907, -0.31942136,  0.25766037,  0.51740763, -0.74276722,  0.29421311,  0.30663471,  0.15537661, -0.20664637,  0.38923648,  0.85640002, -0.26722239, -0.44110397, -0.02446392],
+                        [0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277],
+                        [0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067,  0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798],
+                        [0.27475478,  0.2682452,   0.4387596,   0.47235593,  0.87732918, -0.01675131,  0.08302277,  0.24191878,  0.30939576,  0.25838614,  0.04211683, -0.66689235, -0.44050762,  0.59952798,  0.1105878,   0.33967509,  0.38925944,  0.50825334,  0.20884794, -0.4715363,   0.68972067]]
 
         idx_qpos = np.random.randint(0, 6)
         # idx_qpos = 0
@@ -800,14 +661,18 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         noise_low = -self._reset_noise_scale
         noise_high = self._reset_noise_scale
 
-        qpos = qpos + self.np_random.uniform(
+        qpos = qpos + np.random.uniform(
             low=noise_low, high=noise_high, size=self.model.nq
         )
         qvel = (
             self.init_qvel
-            + self._reset_noise_scale * self.np_random.standard_normal(self.model.nv)
+            + self._reset_noise_scale * np.random.standard_normal(self.model.nv)
         )
-        self.set_state(qpos, qvel)
+        self.data.qpos[:] = np.copy(qpos)
+        self.data.qvel[:] = np.copy(qvel)
+        if self.model.na == 0:
+            self.data.act[:] = None
+        mujoco.mj_forward(self.model, self.data)
         # with rolling noise end
 
         '''
@@ -822,11 +687,15 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self.init_qvel
             + self._reset_noise_scale * self.np_random.standard_normal(self.model.nv)
         )
-
-        if self._desired_action == "turn" or self._desired_action == "tracking":
-            self.set_state(qpos, qvel)
         # without rolling noise end
         #'''
+
+        if self._desired_action == "turn" or self._desired_action == "tracking" or self._desired_action == "aiming":
+            self.data.qpos[:] = np.copy(qpos)
+            self.data.qvel[:] = np.copy(qvel)
+            if self.model.na == 0:
+                self.data.act[:] = None
+            mujoco.mj_forward(self.model, self.data)
         
         position_r01 = qpos[0:3]
         rotation_r01 = Rotation.from_quat([qpos[4], qpos[5], qpos[6], qpos[3]]).as_euler('xyz')
@@ -863,7 +732,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         qpos_new = np.concatenate((position_r01_new, rot_quat_r01_new, position_r23_new, rot_quat_r23_new,
                                    position_r45_new, rot_quat_r45_new))
-        self.set_state(qpos_new, qvel)
+        self.data.qpos[:] = np.copy(qpos_new)
+        self.data.qvel[:] = np.copy(qvel)
+        if self.model.na == 0:
+            self.data.act[:] = None
+        mujoco.mj_forward(self.model, self.data)
 
         rng = np.random.default_rng()
         random = rng.standard_normal(size=6)
@@ -888,12 +761,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         right_COM_before = (pos_r01_right_end+pos_r23_right_end+pos_r45_right_end)/3
         orientation_vector_before = left_COM_before - right_COM_before
         self._reset_psi = np.arctan2(-orientation_vector_before[0], orientation_vector_before[1])
-        self._reset_psi += self._iniyaw_bias
-        self._reset_psi = np.arctan2(np.sin(self._reset_psi), np.cos(self._reset_psi))
-        self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0])/2, (left_COM_before[1]+right_COM_before[1])/2])
         
 
         if self._desired_action == "tracking":
+            self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0])/2, (left_COM_before[1]+right_COM_before[1])/2])
             min_waypt_range, max_waypt_range = self._waypt_range
             min_waypt_angle, max_waypt_angle = self._waypt_angle_range
             waypt_length = np.random.uniform(min_waypt_range, max_waypt_range)
@@ -907,27 +778,48 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             # if self._is_test == True: # for test3
             #     self._waypt = np.array([0, 0]) # for test3
         
+        elif self._desired_action == "aiming":
+            self._oripoint = np.array([(left_COM_before[0]+right_COM_before[0]/2), (left_COM_before[1]+right_COM_before[1])/2])
+            min_waypt_range, max_waypt_range = self._waypt_range
+            min_waypt_angle = -np.pi
+            max_waypt_angle = np.pi
+            waypt_length = np.random.uniform(min_waypt_range, max_waypt_range)
+            waypt_yaw = np.random.uniform(min_waypt_angle, max_waypt_angle) + self._reset_psi
+            if self._is_test == True:
+                kmm_length = 0.5
+                kmm_yaw = 0.75
+                waypt_length = kmm_length*max_waypt_range + (1-kmm_length)*min_waypt_range
+                waypt_yaw = (kmm_yaw*max_waypt_angle + (1-kmm_yaw)*min_waypt_angle) + self._reset_psi
+            self._waypt = np.array([self._oripoint[0] + waypt_length * np.cos(waypt_yaw), self._oripoint[1] + waypt_length * np.sin(waypt_yaw)])
+            if self._is_test == True: # for test3
+                self._waypt = np.array([0, 0]) # for test3
+        
         elif self._desired_action == "vel_track":
             lin_vel_scale = 0.5
             self._lin_vel_cmd = np.array([lin_vel_scale*np.cos(self._reset_psi), lin_vel_scale*np.sin(self._reset_psi)])
             self._ang_vel_cmd = 0.0
                 
-        obs_act_seq = []
-        for i in range(64):
-            self.do_simulation(tendons, self.frame_skip)
-            _, observation = self._get_obs()
-            action = self.data.ctrl[:].copy()
-            obs_act_seq.append(np.concatenate((observation, action)))
-        obs_act_seq = np.array(obs_act_seq)
-
         self._step_num = 0
-        if self._desired_action == "turn":
+        if self._desired_action == "turn" or self._desired_action == "aiming":
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
-        
-        state, observation = self._get_obs()
+        observation, observation_with_noise = self._get_obs()
 
-        return state, observation, obs_act_seq
+        # if self._use_obs_noise == False:
+        #     return observation
+        # else:
+        #     return observation_with_noise
+        return observation, observation_with_noise
+    
+    def reset(self):
+        mujoco.mj_resetData(self.model, self.data)
+        return self._reset_model(), None
+    
+    def do_simulation(self, ctrl, n_frames):
+        self.data.ctrl[:] = ctrl
+
+        mujoco.mj_step(self.model, self.data, nstep=self.frame_skip)
+        mujoco.mj_rnePostConstraint(self.model, self.data)
 
     def viewer_setup(self):
         assert self.viewer is not None

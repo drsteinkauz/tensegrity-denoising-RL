@@ -172,7 +172,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs = env.reset()[0]
+    state, obs, obs_act_seq = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -185,16 +185,45 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     waypt_list = []
     x_pos_list = []
     y_pos_list = []
+
+    predicted_friction_list = []
+    predicted_damping_s_list = []
+    predicted_damping_c_list = []
+    predicted_stiffness_s_list = []
+    predicted_stiffness_c_list = []
+    friction_list = []
+    damping_s_list = []
+    damping_c_list = []
+    stiffness_s_list = []
+    stiffness_c_list = []
+
+    obs_posi_list = []
+    gt_posi_list = []
+    predicted_posi_list = []
+    tb  = TensorBuffer()
+    tb.to(device)
     iter = int(simulation_seconds/dt)
     for i in range(iter):
+
+        obs_act = np.concatenate((obs, action_scaled))
+        obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
         # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
         action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled.detach() * 0.05
         _, obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        predicted_inheparam = None
+        predicted_inheparam_numpy = predicted_inheparam.detach().cpu().numpy()
+        predicted_friction_list.append(predicted_inheparam_numpy[0][-3])
+        predicted_damping_c_list.append(predicted_inheparam_numpy[0][-2])
+        predicted_stiffness_c_list.append(predicted_inheparam_numpy[0][-1])
+        friction_list.append(state[-3])
+        damping_c_list.append(state[-2])
+        stiffness_c_list.append(state[-1])
 
-
+        obs_posi_list.append(obs[:18])
+        gt_posi_list.append(state[:18])
 
         actions_list.append(action_scaled.detach().numpy())
         #the tendon lengths are the last 9 observations
@@ -203,7 +232,6 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
         cap_posi_list.append(info["real_observation"][:18])
         reward_forward_list.append(info["reward_forward"])
         reward_ctrl_list.append(info["reward_ctrl"])
-        waypt_list.append(info["waypt"])
         x_pos_list.append(info["x_position"])
         y_pos_list.append(info["y_position"])
 
@@ -232,8 +260,17 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
     np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
     np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
-    if env._desired_action == "tracking":
-        np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+
+    np.save(os.path.join(saved_data_dir, "predicted_friction_data.npy"),np.array(predicted_friction_list))
+    np.save(os.path.join(saved_data_dir, "predicted_damping_c_data.npy"),np.array(predicted_damping_c_list))
+    np.save(os.path.join(saved_data_dir, "predicted_stiffness_c_data.npy"),np.array(predicted_stiffness_c_list))
+    np.save(os.path.join(saved_data_dir, "friction_data.npy"),np.array(friction_list))
+    np.save(os.path.join(saved_data_dir, "damping_c_data.npy"),np.array(damping_c_list))
+    np.save(os.path.join(saved_data_dir, "stiffness_c_data.npy"),np.array(stiffness_c_list))
+
+    np.save(os.path.join(saved_data_dir, "obs_posi_data.npy"),np.array(obs_posi_list))
+    np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
 
 def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -293,8 +330,9 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('--train', action='store_true')
-    parser.add_argument('--test', metavar='path_to_model')
-    parser.add_argument('--group_test', metavar='path_to_model')
+    parser.add_argument('--test', metavar='path_to_model', nargs=2)
+    parser.add_argument('--test3', metavar='path_to_model', nargs=3)
+    parser.add_argument('--tracking_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
     parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
@@ -331,12 +369,18 @@ if __name__ == "__main__":
     parser.add_argument('--device', default=torch.device("cuda" if torch.cuda.is_available() else "cpu"), type=int,
                         help="device working on, default is torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")")
     args = parser.parse_args()
-
     if args.terminate_when_unhealthy == "no":
         terminate_when_unhealthy = False
     else:
         terminate_when_unhealthy = True
     
+    if args.env_xml == "w":
+        args.env_xml = "3tr_will_normal_size.xml"
+        robot_type = "w"
+    elif args.env_xml == "j":
+        args.env_xml = "3prism_jonathan_steady_side.xml"
+        robot_type = "j"
+
     if args.env_xml == "w":
         args.env_xml = "3tr_will_normal_size.xml"
         robot_type = "w"
@@ -351,19 +395,21 @@ if __name__ == "__main__":
                                     is_test = False,
                                     desired_action = args.desired_action,
                                     desired_direction = args.desired_direction,
-                                    terminate_when_unhealthy = terminate_when_unhealthy)for _ in range(args.batch_size)]
-        
-        train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size)
+                                    terminate_when_unhealthy = terminate_when_unhealthy)]
+        if args.starting_point and os.path.isfile(args.starting_point):
+            train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size, starting_point=args.starting_point)
+        else:
+            train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size)
 
     if(args.test):
-        if os.path.isfile(args.test):
-            gymenv = tr_env_gym.tr_env_gym(render_mode='human',
+        if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_actor=args.test[0], path_to_ge=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
 
