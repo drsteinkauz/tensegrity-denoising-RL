@@ -64,11 +64,16 @@ class PolicyNetwork(nn.Module):
     def sample(self, observation):
         epsilon_tanh = 1e-6
         mean, std = self.forward(observation)
+        if torch.isnan(mean).any():
+                    raise ValueError("Mean observation contains NaN values")
+        if torch.isnan(std).any():
+                    raise ValueError("Std observation contains NaN values")
         dist = torch.distributions.Normal(mean, std)
         action_unbounded = dist.rsample()
         action_bounded = torch.tanh(action_unbounded) * (1 - epsilon_tanh)
         action_log_prob = dist.log_prob(action_unbounded)
         action_log_prob -= torch.log(1 - action_bounded.pow(2) + epsilon_tanh)
+        #print(action_log_prob)
         action_log_prob = action_log_prob.sum(1, keepdim=True)
         mean_bounded = torch.tanh(mean)
         return action_bounded, action_log_prob, std
@@ -87,8 +92,9 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, state_dim, obs_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, capacity, state_dim, obs_dim, action_dim, batch_size=256, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         self.capacity = capacity
+        self.batch_size = batch_size
         self.device = device
         self.ptr = 0
         self.size = 0
@@ -100,7 +106,7 @@ class ReplayBuffer:
         self.next_states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.next_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
-    
+
     def push(self, state, observation, action, reward, next_state, next_observation, done):
         i = self.ptr
 
@@ -115,17 +121,22 @@ class ReplayBuffer:
 
         self.ptr = (self.ptr + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
-    
-    def sample(self, batch_size):
-        # batch = random.sample(self.buffer, batch_size)
+
+    def sample(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size
+
         indices = torch.randint(0, self.size, (batch_size,), device=self.device)
         batch = (self.states[indices], self.observations[indices], self.actions[indices], self.rewards[indices], self.next_states[indices], self.next_observations[indices], self.dones[indices])
         return batch
 
+    def size(self):
+        return self.size
+
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"), batch_size=4):
         # Device
         self.device = device
 
@@ -134,7 +145,7 @@ class SACAgent:
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
         self.batch_size = 256    # Batch size
-        self.buffer_size = 1000000 # Replay buffer size
+        self.buffer_size = 1000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
 
@@ -159,7 +170,9 @@ class SACAgent:
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
     
     def select_action(self, observation):
-        observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
+        #print(observation)
+        observation = torch.stack([tensor.to(self.device) for tensor in observation])
+        #observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
             action, _, _ = self.actor.sample(observation)
         return action.squeeze(0).cpu().numpy()

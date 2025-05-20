@@ -44,6 +44,16 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
         reward_delay_seconds = 0.02, # 0.5,
+        # friction_noise_range = (0.25, 2.0),
+        # damping_noise_range_side = (0.25, 4.0),
+        # damping_noise_range_cross = (2.5, 40),
+        # stiffness_noise_range_side = (5, 20),
+        # stiffness_noise_range_cross = (75, 300),
+        friction_noise_range = (1, 1),
+        damping_noise_range_side = (1, 1),
+        damping_noise_range_cross = (10, 10),
+        stiffness_noise_range_side = (10, 10),
+        stiffness_noise_range_cross = (150, 150),
         contact_with_self_penalty = 0.0,
         robot_type = "w",
         tendon_reset_mean_w = 0.05,
@@ -103,6 +113,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             min_reset_heading,
             max_reset_heading,
             reward_delay_seconds,
+            friction_noise_range,
+            damping_noise_range_side,
+            damping_noise_range_cross,
+            stiffness_noise_range_side,
+            stiffness_noise_range_cross,
             contact_with_self_penalty,
             robot_type,
             tendon_reset_mean_w,
@@ -213,6 +228,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         else:
             raise ValueError("robot_type should be either w or j")
+
+        self._friction_noise_range = friction_noise_range
+        self._damping_noise_range_side = damping_noise_range_side
+        self._damping_noise_range_cross = damping_noise_range_cross
+        self._stiffness_noise_range_side = stiffness_noise_range_side
+        self._stiffness_noise_range_cross = stiffness_noise_range_cross
 
         self._healthy_reward = healthy_reward
         self._terminate_when_unhealthy = terminate_when_unhealthy
@@ -542,6 +563,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         state = np.concatenate((pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
         state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
+        if self._use_obs_noise == True:
+            observation = state_with_noise
+        else:
+            observation = state
+
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
 
@@ -613,11 +639,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
             state = np.concatenate((state, vel_cmd))
             state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-
-        if self._use_obs_noise == True:
-            observation = state_with_noise
-        else:
-            observation = state
+        
+        state = np.concatenate((state, [self.model.geom_friction[0,0]], 
+                                [self.model.tendon_damping[6]], [self.model.tendon_damping[12]], 
+                                [self.model.tendon_stiffness[6]], [self.model.tendon_stiffness[12]]))
 
         if self._use_inherent_params_dr:
             if self._robot_type == "w":
