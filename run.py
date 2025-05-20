@@ -1,6 +1,6 @@
-import ge_sac
+import asac
 import tr_env_gym
-from tensor_buffer import TensorBuffer
+
 import os
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -8,7 +8,7 @@ import argparse
 import numpy as np
 import time
 
-def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_recorder="False"):
+def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -16,13 +16,14 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = ge_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, inheparam_dim=env.inheparam_shape, inheparam_dist=env.inheparam_dist, device=device)
+    agent = asac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
+
     agent.lr = lr
-    agent.lr_GE = gre_lr
+    
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    TIMESTEPS = 25000
+    TIMESTEPS = 100000
     step_num = 0
     eps_num = 0
 
@@ -32,8 +33,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
         writer = SummaryWriter(log_dir)
 
     while True:
-        # state, observation = env.reset()[0]
-        state, observation, obs_act_seq = env.reset()[0]
+        state, observation = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -46,34 +46,27 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             critic_losses = []
             ent_coef_losses = []
             ent_coefs = []
-            predict_losses = []
-            predict_errors = []
 
         start_time = time.time()
-        if env._use_stability_detection:
-            stability_cnt = 0
+
         while True:
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(obs_act_seq, observation, state)
+                action_scaled = agent.select_action(observation)
             next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
-            next_obs_act = np.concatenate((next_observation, action_scaled))
-            next_obs_act_seq = np.concatenate((obs_act_seq[1:], next_obs_act.reshape(1, -1)), axis=0)
-            agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
+            agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
             info_agent = agent.update()
             
             state = next_state
             observation = next_observation
-            obs_act_seq = next_obs_act_seq
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
             episode_ctrl_reward += info_env["reward_ctrl"]
-            
+
             step_num += 1
             episode_len += 1
-            if env._use_stability_detection:
-                stability_cnt+=state[0]
+
             if info_agent is not None:
                 if tb_step_recorder == "True":
                     writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
@@ -87,14 +80,11 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                     critic_losses.append(info_agent["critic_loss"])
                     ent_coef_losses.append(info_agent["ent_coef_loss"])
                     ent_coefs.append(info_agent["ent_coef"])
-                    predict_losses.append(info_agent["predict_loss"])
-                    predict_errors.append(info_agent["predict_error"])
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-                torch.save(agent.gruencoder.state_dict(), os.path.join(model_dir, f"gruencoder_{step_num}.pth"))
 
-            if done or episode_len >= 1500:
+            if done or episode_len >= 5000:
                 break
 
         end_time = time.time()
@@ -103,19 +93,13 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
         eps_num += 1
         writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
         writer.add_scalar("ep/ep_len", episode_len, eps_num)
-        writer.add_scalar("ep/RL_learning_rate", agent.lr, eps_num)
-        writer.add_scalar("ep/gre_lr",agent.lr_GE,eps_num)
+        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
         writer.add_scalar("ep/train_speed", train_speed, step_num)
-        if env._use_stability_detection:
-            writer.add_scalar("ep/stability_rate",stability_cnt/episode_len,eps_num)
         if tb_step_recorder == "False":
             writer.add_scalar("loss/actor_loss", np.array(actor_losses).mean(), step_num)
             writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef_loss", np.array(ent_coef_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
-            writer.add_scalar("loss/predict_loss", np.array(predict_losses).mean(), step_num)
-            writer.add_scalar("loss/predict_error", np.array(predict_errors).mean(), step_num)
-            
         writer.flush()
         if tb_step_recorder == "True":
             writer.close()
@@ -133,17 +117,15 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     
     writer.close()
 
-def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
+def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = ge_sac.PolicyNetwork(env.observation_space.shape[0]+env.inheparam_shape, env.action_space.shape[0]).to(device)
-    actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
-    actor.load_state_dict(actor_state_dict)
-    ge = ge_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.inheparam_shape).to(device)
-    ge_state_dict = torch.load(path_to_ge, map_location=torch.device(device=device))
-    ge.load_state_dict(ge_state_dict)
+    actor = asac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    state, obs, obs_act_seq = env.reset()[0]
+    _, obs = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -156,56 +138,25 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     waypt_list = []
     x_pos_list = []
     y_pos_list = []
-
-    predicted_friction_list = []
-    predicted_damping_s_list = []
-    predicted_damping_c_list = []
-    predicted_stiffness_s_list = []
-    predicted_stiffness_c_list = []
-    friction_list = []
-    damping_s_list = []
-    damping_c_list = []
-    stiffness_s_list = []
-    stiffness_c_list = []
-
-    obs_posi_list = []
-    gt_posi_list = []
-    predicted_posi_list = []
-    tb  = TensorBuffer()
-    tb.to(device)
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        predicted_inheparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
-        tb.add_tensor(predicted_inheparam)
-        predicted_inheparam = tb.sample()
-        gt_inheparam = torch.from_numpy(state[-3:]).detach().float().to(device).unsqueeze(0)
-        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_inheparam], dim=-1)
-        #feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), gt_inheparam], dim=-1)
-        action_scaled, _ = actor.predict(feature)
-        action_scaled = action_scaled.flatten().detach().cpu().numpy()
-        state, obs, _, done, _, info = env.step(action_scaled)
+        # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+        action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+        action_scaled = torch.tanh(action_scaled)
+        # action_unscaled = action_scaled.detach() * 0.3 - 0.15
+        action_unscaled = action_scaled.detach() * 0.05
+        _, obs, _, done, _, info = env.step(action_scaled.detach().numpy())
 
-        obs_act = np.concatenate((obs, action_scaled))
-        obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
 
-        predicted_inheparam_numpy = predicted_inheparam.detach().cpu().numpy()
-        predicted_friction_list.append(predicted_inheparam_numpy[0][-3])
-        predicted_damping_c_list.append(predicted_inheparam_numpy[0][-2])
-        predicted_stiffness_c_list.append(predicted_inheparam_numpy[0][-1])
-        friction_list.append(state[-3])
-        damping_c_list.append(state[-2])
-        stiffness_c_list.append(state[-1])
 
-        obs_posi_list.append(obs[:18])
-        gt_posi_list.append(state[:18])
-
-        actions_list.append(action_scaled)
+        actions_list.append(action_scaled.detach().numpy())
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
         cap_posi_list.append(info["real_observation"][:18])
         reward_forward_list.append(info["reward_forward"])
         reward_ctrl_list.append(info["reward_ctrl"])
+        waypt_list.append(info["waypt"])
         x_pos_list.append(info["x_position"])
         y_pos_list.append(info["y_position"])
 
@@ -230,23 +181,63 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
     np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
     np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
-    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
     np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
     np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
     np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
     np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
-    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
+    if env._desired_action == "tracking":
+        np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
 
-    np.save(os.path.join(saved_data_dir, "predicted_friction_data.npy"),np.array(predicted_friction_list))
-    np.save(os.path.join(saved_data_dir, "predicted_damping_c_data.npy"),np.array(predicted_damping_c_list))
-    np.save(os.path.join(saved_data_dir, "predicted_stiffness_c_data.npy"),np.array(predicted_stiffness_c_list))
-    np.save(os.path.join(saved_data_dir, "friction_data.npy"),np.array(friction_list))
-    np.save(os.path.join(saved_data_dir, "damping_c_data.npy"),np.array(damping_c_list))
-    np.save(os.path.join(saved_data_dir, "stiffness_c_data.npy"),np.array(stiffness_c_list))
+def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    actor = asac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    actor.load_state_dict(state_dict)
+    os.makedirs(saved_data_dir, exist_ok=True)
 
-    np.save(os.path.join(saved_data_dir, "obs_posi_data.npy"),np.array(obs_posi_list))
-    np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
+    oript_list = []
+    xy_pos_list = []
+    iniyaw_list = []
+    if env._desired_action == "tracking":
+        waypt_list = []
+    for i in range(group_num):
+        _, obs = env.reset()[0]
+        done = False
+        extra_steps = 500
 
+        dt = env.dt
+        iter = int(simulation_seconds/dt)
+        for j in range(iter):
+            # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
+            action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+            action_scaled = torch.tanh(action_scaled)
+            _, obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+
+            if done:
+                extra_steps -= 1
+                if extra_steps < 0:
+                    break
+        oript_list.append(np.array(env._oripoint))
+        xy_pos_list.append(np.array([info["x_position"], info["y_position"]]))
+        iniyaw_list.append(np.array([env._reset_psi]))
+        if env._desired_action == "tracking":
+            waypt_list.append(np.array(env._waypt))
+    oript_array = np.array(oript_list)
+    xy_pos_array = np.array(xy_pos_list) - oript_array
+    iniyaw_array = np.array(iniyaw_list)
+    if env._desired_action == "tracking":
+        waypt_array = np.array(waypt_list) - oript_array
+
+    for i in range(group_num):
+        iniyaw_ang = iniyaw_list[i][0]
+        rot_mat = np.array([[np.cos(iniyaw_ang), np.sin(iniyaw_ang)],[-np.sin(iniyaw_ang), np.cos(iniyaw_ang)]])
+        xy_pos_array[i] = np.dot(rot_mat, xy_pos_array[i].T).T
+        if env._desired_action == "tracking":
+            waypt_array[i] = np.dot(rot_mat, waypt_array[i].T).T
+    np.save(os.path.join(saved_data_dir, "group_xy_pos_data.npy"),xy_pos_array)
+    if env._desired_action == "tracking":
+        np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
 
 # Training loop
 if __name__ == "__main__":
@@ -255,9 +246,8 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('--train', action='store_true')
-    parser.add_argument('--test', metavar='path_to_model', nargs=2)
-    parser.add_argument('--test3', metavar='path_to_model', nargs=3)
-    parser.add_argument('--tracking_test', metavar='path_to_model')
+    parser.add_argument('--test', metavar='path_to_model')
+    parser.add_argument('--group_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
     parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
@@ -287,14 +277,13 @@ if __name__ == "__main__":
                         help="learning rate for SAC, default is 3e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
-    parser.add_argument('--gre_lr', default=1e-3, type=float,
-                        help="grelr")
     args = parser.parse_args()
+
     if args.terminate_when_unhealthy == "no":
         terminate_when_unhealthy = False
     else:
         terminate_when_unhealthy = True
-
+    
     if args.env_xml == "w":
         args.env_xml = "3tr_will_normal_size.xml"
         robot_type = "w"
@@ -311,18 +300,30 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)
         if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC,gre_lr =args.gre_lr,  gpu_idx=args.gpu_idx, starting_point= args.starting_point)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
         else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC,gre_lr =args.gre_lr, gpu_idx=args.gpu_idx)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
 
     if(args.test):
-        if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
+        if os.path.isfile(args.test):
+            gymenv = tr_env_gym.tr_env_gym(render_mode='human',
+                                        xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        robot_type=robot_type,
+                                        is_test = True,
+                                        desired_action = args.desired_action,
+                                        desired_direction = args.desired_direction)
+            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+        else:
+            print(f'{args.test} not found.')
+
+    if(args.group_test):
+        if os.path.isfile(args.group_test):
             gymenv = tr_env_gym.tr_env_gym(render_mode='None',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_actor=args.test[0], path_to_ge=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
         else:
-            print(f'{args.test} not found.')
+            print(f'{args.group_test} not found.')
