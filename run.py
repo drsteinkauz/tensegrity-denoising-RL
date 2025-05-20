@@ -23,7 +23,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    TIMESTEPS = 25000
+    TIMESTEPS = 100000
     step_num = 0
     eps_num = 0
 
