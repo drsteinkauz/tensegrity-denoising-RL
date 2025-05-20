@@ -233,6 +233,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         obs_shape = 18
         if use_tendon_length:
             obs_shape += 9
+        if use_cap_velocity:
+            obs_shape += 18
         if use_stability_detection:
             obs_shape += 1
         if use_contact_forces:
@@ -242,18 +244,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif desired_action == "tracking":
             obs_shape += 2 # tracking vector x, y
         
+        self.state_shape = obs_shape
+
         self.intriparam_shape = 3 # 3 for friction coefficient, damping of cross, stiffness of cross
         self.intriparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
                                          [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
                                          [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]]])
-        if self._use_intrinsic_params_dr:
-            self.state_shape = obs_shape + self.intriparam_shape
-        else:
-            self.state_shape = obs_shape
-
-        if use_cap_velocity:
-            self.state_shape += 18
-            obs_shape += 18
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -373,7 +369,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_length = np.array(self.data.ten_length)
         tendon_length_6 = tendon_length[:6]
 
-        state, observation = self._get_obs()
+        state, observation, gt_log_intriparam = self._get_obs()
 
 
         if self._desired_action == "turn":
@@ -442,7 +438,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1500:
+            if self._step_num > 1000:
                 terminated = True
             if np.linalg.norm(xy_position_after - self._waypt) < self._threshold_waypt:
                 terminated = True
@@ -500,7 +496,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if self.render_mode == "human":
             self.render()
         
-        return state, observation, reward, terminated, False, info
+        return state, observation, gt_log_intriparam, reward, terminated, False, info
 
     def _get_obs(self):
         
@@ -636,21 +632,20 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         else:
             observation = state
         
-        if self._use_intrinsic_params_dr:
-            if self._robot_type == "w":
-                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-                log_damping = np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0])
-                log_stiffness = np.log(self.model.tendon_stiffness[12] / self._stiffness_noise_dist_cross[0])
-            elif self._robot_type == "j":
-                log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-                log_damping = np.log(self.model.tendon_damping[6] / self._damping_noise_dist_cross[0])
-                log_stiffness = np.log(self.model.tendon_stiffness[6] / self._stiffness_noise_dist_cross[0])
-            
-            state = np.concatenate((state, np.array([log_friction,  # friction coefficient
-                                                     log_damping,  # damping of cross tendon
-                                                     log_stiffness]))) # stiffness of cross tendon
+        if self._robot_type == "w":
+            log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
+            log_damping = np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0])
+            log_stiffness = np.log(self.model.tendon_stiffness[12] / self._stiffness_noise_dist_cross[0])
+        elif self._robot_type == "j":
+            log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
+            log_damping = np.log(self.model.tendon_damping[6] / self._damping_noise_dist_cross[0])
+            log_stiffness = np.log(self.model.tendon_stiffness[6] / self._stiffness_noise_dist_cross[0])
+        
+        gt_log_intriparam = np.array([log_friction,  # friction coefficient
+                                        log_damping,  # damping of cross tendon
+                                        log_stiffness]) # stiffness of cross tendon
 
-        return state, observation
+        return state, observation, gt_log_intriparam
 
     def _is_stable(self,arr, threshold=1e-3):
         if len(arr) < 3:
@@ -903,7 +898,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         obs_act_seq = []
         for i in range(64):
             self.do_simulation(tendons, self.frame_skip)
-            _, observation = self._get_obs()
+            _, observation, _ = self._get_obs()
             action = self.data.ctrl[:].copy()
             obs_act_seq.append(np.concatenate((observation, action)))
         obs_act_seq = np.array(obs_act_seq)
@@ -913,9 +908,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
         
-        state, observation = self._get_obs()
+        state, observation, gt_log_intriparam = self._get_obs()
 
-        return state, observation, obs_act_seq
+        return state, observation, gt_log_intriparam, obs_act_seq
 
     def viewer_setup(self):
         assert self.viewer is not None

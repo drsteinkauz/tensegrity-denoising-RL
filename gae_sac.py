@@ -86,16 +86,16 @@ class PolicyNetwork(nn.Module):
         return super(PolicyNetwork, self).to(device)
     
 class GRUAutoEncoder(nn.Module):
-    def __init__(self, input_dim, feature_dim, output_dim, hidden_dim=256, decoder_scaled_output=False):
+    def __init__(self, input_dim, latent_dim, output_dim, hidden_dim=256, decoder_scaled_output=False):
         super(GRUAutoEncoder, self).__init__()
         self.gru = nn.GRU(input_dim, hidden_dim, batch_first=True)
         self.encoder = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, feature_dim),
+            nn.Linear(hidden_dim, latent_dim),
         )
         self.decoder = nn.Sequential(
-            nn.Linear(feature_dim, hidden_dim),
+            nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, output_dim),
         )
@@ -107,25 +107,25 @@ class GRUAutoEncoder(nn.Module):
         # x: (batch_size, seq_len, input_dim)
         out, hidden_n = self.gru(x)
         last_out = out[:, -1, :]
-        feature = self.encoder(last_out)
-        return feature
+        latent = self.encoder(last_out)
+        return latent
     
-    def decode(self, feature):
-        # feature: (batch_size, feature_dim)
-        decoded = self.decoder(feature)
+    def decode(self, latent):
+        # latent: (batch_size, latent_dim)
+        decoded = self.decoder(latent)
         if self.decoder_scaled_output:
             decoded = torch.tanh(decoded) * (1 - self.epsilon_tanh)
         return decoded
 
     def forward(self, x):
         # x: (batch_size, seq_len, input_dim)
-        feature = self.encode(x)
-        decoded = self.decode(feature)
+        latent = self.encode(x)
+        decoded = self.decode(latent)
         return decoded
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, state_dim, obs_dim, action_dim, obs_act_seq_len=64, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, capacity, state_dim, obs_dim, intriparam_dim, action_dim, obs_act_seq_len=64, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         self.capacity = capacity
         self.device = device
         self.ptr = 0
@@ -133,7 +133,8 @@ class ReplayBuffer:
 
         self.states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
-        self.obs_act_seq = torch.zeros((capacity, obs_act_seq_len, obs_dim+action_dim), dtype=torch.float32, device=device)
+        self.gt_log_intriparams = torch.zeros((capacity, intriparam_dim), dtype=torch.float32, device=device)
+        self.obs_act_seqs = torch.zeros((capacity, obs_act_seq_len, obs_dim+action_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
         self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
         self.next_states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
@@ -141,13 +142,14 @@ class ReplayBuffer:
         self.next_obs_act_seq = torch.zeros((capacity, obs_act_seq_len, obs_dim+action_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
     
-    def push(self, state, observation, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done):
+    def push(self, state, observation, gt_log_intriparam, obs_act_seq, action, reward, next_state, next_observation, next_obs_act_seq, done):
         i = self.ptr
 
         with torch.no_grad():
             self.states[i] = torch.tensor(state, dtype=torch.float32, device=self.device)
             self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
-            self.obs_act_seq[i] = torch.tensor(obs_act_seq, dtype=torch.float32, device=self.device)
+            self.gt_log_intriparams[i] = torch.tensor(gt_log_intriparam, dtype=torch.float32, device=self.device)
+            self.obs_act_seqs[i] = torch.tensor(obs_act_seq, dtype=torch.float32, device=self.device)
             self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
             self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
             self.next_states[i] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
@@ -164,7 +166,8 @@ class ReplayBuffer:
         batch = (
             self.states[indices],
             self.observations[indices],
-            self.obs_act_seq[indices],
+            self.gt_log_intriparams[indices],
+            self.obs_act_seqs[indices],
             self.actions[indices],
             self.rewards[indices],
             self.next_states[indices],
@@ -177,7 +180,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, feature_dim, intriparam_dim, intriparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, latent_dim, intriparam_dim, intriparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -203,10 +206,12 @@ class SACAgent:
         self._target_entropy = -action_dim
         
         # Networks
-        self.actor = PolicyNetwork(observation_dim+feature_dim, action_dim).to(self.device)
-        self.critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.gruautoencoder = GRUAutoEncoder(input_dim=observation_dim+action_dim, feature_dim=feature_dim, output_dim=intriparam_dim, decoder_scaled_output=self.decoder_scaled_output).to(self.device)
+        feature_obs_dim = observation_dim + latent_dim
+        feature_state_dim = state_dim + latent_dim
+        self.actor = PolicyNetwork(feature_obs_dim, action_dim).to(self.device)
+        self.critic = QNetwork(feature_state_dim, action_dim).to(self.device)
+        self.target_critic = QNetwork(feature_state_dim, action_dim).to(self.device)
+        self.gruautoencoder = GRUAutoEncoder(input_dim=observation_dim+action_dim, latent_dim=latent_dim, output_dim=intriparam_dim, decoder_scaled_output=self.decoder_scaled_output).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -218,13 +223,13 @@ class SACAgent:
         self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GE)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)
+        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, intriparam_dim=intriparam_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)
     
     def select_action(self, obs_act_seq, observation):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)
-        ip_feature = self.gruautoencoder.encode(obs_act_seq)
+        latent = self.gruautoencoder.encode(obs_act_seq)
         with torch.no_grad():
-            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), ip_feature], dim=-1)
+            feature = torch.cat([torch.FloatTensor(observation).to(self.device).unsqueeze(0), latent], dim=-1)
             action, _, _ = self.actor.sample(feature)
         return action.squeeze(0).cpu().numpy()
     
@@ -246,19 +251,18 @@ class SACAgent:
         #     next_obs_act_seq_batch = torch.FloatTensor(next_obs_act_seq_batch).to(self.device)
         #     done_batch = torch.FloatTensor(done_batch).to(self.device)
         
-        state_batch, observation_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
+        state_batch, observation_batch, gt_log_intriparam_batch, obs_act_seq_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, next_obs_act_seq_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
-        ip_feature_batch = self.gruautoencoder.encode(obs_act_seq_batch)
-        predicted_intriparam_batch = self.gruautoencoder.decode(ip_feature_batch) * torch.log(self.intriparam_std)
-        gt_intriparam_batch = state_batch[:, -self.intriparam_dim:].detach()
-        feature_batch = torch.cat([observation_batch, ip_feature_batch], dim=-1)
-        sampled_action, action_log_prob, std = self.actor.sample(feature_batch)
+        latent_batch = self.gruautoencoder.encode(obs_act_seq_batch)
+        predicted_log_intriparam_batch = self.gruautoencoder.decode(latent_batch) * torch.log(self.intriparam_std)
+        feature_obs_batch = torch.cat([observation_batch, latent_batch], dim=-1)
+        sampled_action, action_log_prob, std = self.actor.sample(feature_obs_batch)
 
         # GRUAutoEncoder update
-        predicted_intriparam_batch_normalized = predicted_intriparam_batch / torch.log(self.intriparam_std)
-        gt_intriparam_batch_normalized = gt_intriparam_batch / torch.log(self.intriparam_std)
-        predict_error = F.mse_loss(predicted_intriparam_batch_normalized, gt_intriparam_batch_normalized)
-        predict_loss = 0.5*predict_error
+        predicted_log_intriparam_batch_normalized = predicted_log_intriparam_batch / torch.log(self.intriparam_std)
+        gt_log_intriparam_batch_normalized = gt_log_intriparam_batch / torch.log(self.intriparam_std)
+        predict_error = F.mse_loss(predicted_log_intriparam_batch_normalized, gt_log_intriparam_batch_normalized)
+        predict_loss = 0.5*predict_error + self.lambda_for_GAE*torch.linalg.norm(latent_batch, ord=1, dim=-1).mean()
         
         # entropy coefficient update
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
@@ -271,13 +275,15 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            next_ip_feature_batch = self.gruautoencoder.encode(next_obs_act_seq_batch)
-            next_feature_batch = torch.cat([next_observation_batch, next_ip_feature_batch], dim=-1)
-            sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_feature_batch)
-            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
+            next_latent_batch = self.gruautoencoder.encode(next_obs_act_seq_batch)
+            next_feature_obs_batch = torch.cat([next_observation_batch, next_latent_batch], dim=-1)
+            sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_feature_obs_batch)
+            next_feature_state_batch = torch.cat([next_state_batch, next_latent_batch], dim=-1)
+            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_feature_state_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
-        q1_value, q2_value = self.critic(state_batch, action_batch)
+            feature_state_batch = torch.cat([state_batch, latent_batch], dim=-1)
+        q1_value, q2_value = self.critic(feature_state_batch, action_batch)
         critic1_loss = F.mse_loss(q1_value, next_q_value)
         critic2_loss = F.mse_loss(q2_value, next_q_value)
         critic_loss = (critic1_loss + critic2_loss) / 2
@@ -287,7 +293,7 @@ class SACAgent:
         self.critic_optimizer.step()
         
         # Actor update
-        q1_pi, q2_pi = self.critic(state_batch, sampled_action)
+        q1_pi, q2_pi = self.critic(feature_state_batch, sampled_action)
         q_value_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
 

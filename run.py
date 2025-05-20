@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, feature_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
+    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, latent_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
 
     agent.lr = lr
     agent.lr_GE = gre_lr
@@ -34,7 +34,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
 
     while True:
         # state, observation = env.reset()[0]
-        state, observation, obs_act_seq = env.reset()[0]
+        state, observation, gt_log_intriparam, obs_act_seq = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -57,10 +57,10 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(obs_act_seq, observation)
-            next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
+            next_state, next_observation, gt_log_intriparam, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
             next_obs_act_seq = np.concatenate((obs_act_seq[1:], next_obs_act.reshape(1, -1)), axis=0)
-            agent.replay_buffer.push(state, observation, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
+            agent.replay_buffer.push(state, observation, gt_log_intriparam, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
             info_agent = agent.update()
             
             state = next_state
