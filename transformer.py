@@ -478,7 +478,6 @@ class OnlineTransformer(nn.Module):
                 T_mult=2,        
                 eta_min=1e-4     
             )
-        
         noise_modified_previledge = torch.cat((noised_input-previledge[...,:self.input_dim]
                                         ,previledge[...,self.input_dim:]),dim=-1)
         if not torch.isnan(noised_input).any():

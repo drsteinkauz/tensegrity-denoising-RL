@@ -31,7 +31,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_tendon_length=False,
         use_cap_velocity=True,
         use_stability_detection=True,
-        use_obs_noise=False,
+        use_obs_noise=True,
         use_inherent_params_dr=True,
         terminate_when_unhealthy=True,
         is_test = False,
@@ -272,6 +272,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         )
         self._reward_delay_steps = int(reward_delay_seconds/self.dt)
         self._heading_buffer = deque()
+        self.obs_shape = obs_shape
 
     @property
     def healthy_reward(self):
@@ -571,7 +572,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             observation = state_with_noise
         else:
             observation = state
-
+        
         if self._use_cap_velocity:
             velocity = self.data.qvel # 18
 
@@ -611,9 +612,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
             state = np.concatenate((state,\
                                         vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
-            state_with_noise = np.concatenate((state,\
+            state_with_noise = np.concatenate((state_with_noise,\
                                         vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
-            
+        
         if self._use_tendon_length:
             state = np.concatenate((state, tendon_lengths))
             state_with_noise = np.concatenate((state_with_noise, tendon_lengths_with_noise))

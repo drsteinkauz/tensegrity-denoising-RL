@@ -100,27 +100,27 @@ class ReplayBuffer:
         self.size = 0
 
         self.states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
-        self.observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.observations = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
         self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
         self.next_states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
-        self.next_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.next_observations = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
 
     def push(self, state, observation, action, reward, next_state, next_observation, done):
         i = self.ptr
-
+        size = state.shape[0]
         with torch.no_grad():
-            self.states[i] = torch.tensor(state, dtype=torch.float32, device=self.device)
-            self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
-            self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
-            self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-            self.next_states[i] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-            self.next_observations[i] = torch.tensor(next_observation, dtype=torch.float32, device=self.device)
-            self.dones[i] = torch.tensor([done], dtype=torch.float32, device=self.device)
+            self.states[i:i+size] = torch.tensor(state, dtype=torch.float32, device=self.device).clone().detach()
+            self.observations[i:i+size] = torch.tensor(observation, dtype=torch.float32, device=self.device).clone().detach()
+            self.actions[i:i+size] = torch.tensor(action, dtype=torch.float32, device=self.device).clone().detach()
+            self.rewards[i:i+size] = torch.tensor(reward, dtype=torch.float32, device=self.device).unsqueeze(1).clone().detach()
+            self.next_states[i:i+size] = torch.tensor(next_state, dtype=torch.float32, device=self.device).clone().detach()
+            self.next_observations[i:i+size] = torch.tensor(next_observation, dtype=torch.float32, device=self.device).clone().detach()
+            self.dones[i:i+size] = torch.tensor(done, dtype=torch.float32, device=self.device).unsqueeze(1).clone().detach()
 
-        self.ptr = (self.ptr + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        self.ptr = (self.ptr + size) % self.capacity
+        self.size = min(self.size + size, self.capacity)
 
     def sample(self, batch_size=None):
         if batch_size is None:
@@ -145,7 +145,7 @@ class SACAgent:
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
         self.batch_size = 256    # Batch size
-        self.buffer_size = 1000 # Replay buffer size
+        self.buffer_size = 1600 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
 
@@ -154,7 +154,7 @@ class SACAgent:
         self._target_entropy = -action_dim
         
         # Networks
-        self.actor = PolicyNetwork(observation_dim, action_dim).to(self.device)
+        self.actor = PolicyNetwork(state_dim, action_dim).to(self.device)
         self.critic = QNetwork(state_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
         

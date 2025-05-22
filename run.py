@@ -1,4 +1,4 @@
-import asac
+#import asac
 import tr_env_gym
 import transformer
 import sac
@@ -27,15 +27,22 @@ def batched_step(env, action,batch_size,device):
 
 def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, feature_type=0):
     
+    state, observation, obs_act_seq = zip(*(env[i].reset()[0] for i in range(batch_size)))
+    #print(observation)
+    state = torch.from_numpy(np.array(state)).float()
+    observation = torch.from_numpy(np.array(observation)).float()
+
     feature_list = [41,105,82]
-    state_dim = env[0].state_shape+5 # 5 is the number for damping and friction
-    observation_dim = feature_list[feature_type]
+    state_dim = state.shape[-1] # 5 is the number for damping and friction
+    observation_dim = observation.shape[-1]
     action_dim = env[0].action_space.shape[0]
     # print("state_dim", state_dim)
     # print("observation_dim", observation_dim)
     # print("action_dim", action_dim)
+    # exit()
+
     agent = sac.SACAgent(state_dim, observation_dim, action_dim, device=device, batch_size=batch_size)
-    otf = transformer.OnlineTransformer(input_dim=18, output_dim=41, d_model=128, num_encoder_layers=7, 
+    otf = transformer.OnlineTransformer(input_dim=observation_dim, output_dim=state_dim, d_model=128, num_encoder_layers=7, 
                                         num_decoder_layers=7, nhead=8, dropout=0.4, batch_size=batch_size, 
                                         dim_feedforward=128,device=device)
 
@@ -53,10 +60,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
 
     timer = Timer()
 
-    state, observation = zip(*(env[i].reset()[0] for i in range(batch_size)))
-    #print(observation)
-    state = torch.from_numpy(np.array(state)).float()
-    observation = torch.from_numpy(np.array(observation)).float()
+    
     episode_reward = np.array([0.0 for _ in range(batch_size)])
     episode_len = np.array([0 for _ in range(batch_size)])
     episode_forward_reward = np.array([0.0 for _ in range(batch_size)])
@@ -83,13 +87,13 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         next_state, next_observation, reward, done, info_env = batched_step(env, action_unscaled, batch_size, device=agent.device)
         #print("next_observation",next_observation.shape,"next_state[...,:18]",next_state[...,:18].shape)
         #print(isinstance(done, np.ndarray),isinstance(next_observation, np.ndarray),isinstance(next_state, np.ndarray))
-        
+
         timer.clip_group()
 
         if done.any() or torch.isnan(next_observation).any() or (episode_len >= 5000).any():
             mask = torch.isnan(next_observation).any(dim=1).cpu().numpy() | done | (episode_len >= 5000)
             print("isnan(next_observation).any(),",np.where(mask)[0]," of env restarted")
-            mask_state, mask_observation = zip(*(env[i].reset()[0] for i in np.where(mask)[0]))
+            mask_state, mask_observation, mask_obs_act_seq = zip(*(env[i].reset()[0] for i in np.where(mask)[0]))
             mask_state = torch.from_numpy(np.array(mask_state)).float()
             mask_observation = torch.from_numpy(np.array(mask_observation)).float()
             next_state[mask,:],next_observation[mask,:] = mask_state.to(device), mask_observation.to(device)
@@ -98,7 +102,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
         
         timer.clip_group()
 
-        info_otf = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
+        info_otf, otf_loss = otf.update(noised_input=next_observation, previledge=next_state, epoch=eps_num, learning_rate=lr_Transformer)
         next_feature = otf.get_feature(type_index=0)
         if torch.isnan(next_feature).any():
             print("isnan(next_feature).any(), a group of env restarted")
@@ -128,6 +132,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
             writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
             writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
             writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
+            writer.add_scalar("loss/otf_loss", otf_loss, step_num)
 
         if step_num % TIMESTEPS == 0:
             torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
@@ -157,6 +162,7 @@ def train(env, log_dir, model_dir, lr_SAC, lr_Transformer, device, batch_size, f
             timer.new_time_group(6)
             time100 = timer.clip_time()
             print(f"{time100:.3g}s for 100 steps; {time100*2.5/9:.3g}h for 100k steps")
+            print(f"otf loss: {otf_loss}")
             print("--------------------------------")
 
         
@@ -395,7 +401,7 @@ if __name__ == "__main__":
                                     is_test = False,
                                     desired_action = args.desired_action,
                                     desired_direction = args.desired_direction,
-                                    terminate_when_unhealthy = terminate_when_unhealthy)]
+                                    terminate_when_unhealthy = terminate_when_unhealthy) for _ in range(args.batch_size)]
         if args.starting_point and os.path.isfile(args.starting_point):
             train(gymenv, args.log_dir, args.model_dir, lr_SAC=args.lr_SAC, lr_Transformer=args.lr_Transformer, device=args.device, batch_size=args.batch_size, starting_point=args.starting_point)
         else:
@@ -413,14 +419,14 @@ if __name__ == "__main__":
         else:
             print(f'{args.test} not found.')
 
-    if(args.group_test):
-        if os.path.isfile(args.group_test):
-            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
-                                        xml_file=os.path.join(os.getcwd(),args.env_xml),
-                                        robot_type=robot_type,
-                                        is_test = True,
-                                        desired_action = args.desired_action,
-                                        desired_direction = args.desired_direction)
-            group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
-        else:
-            print(f'{args.group_test} not found.')
+    # if(args.group_test):
+    #     if os.path.isfile(args.group_test):
+    #         gymenv = tr_env_gym.tr_env_gym(render_mode='None',
+    #                                     xml_file=os.path.join(os.getcwd(),args.env_xml),
+    #                                     robot_type=robot_type,
+    #                                     is_test = True,
+    #                                     desired_action = args.desired_action,
+    #                                     desired_direction = args.desired_direction)
+    #         group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
+    #     else:
+    #         print(f'{args.group_test} not found.')
