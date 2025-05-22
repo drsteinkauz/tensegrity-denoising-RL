@@ -87,31 +87,26 @@ class PolicyNetwork(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, state_dim, obs_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, capacity, obs_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         self.capacity = capacity
         self.device = device
         self.ptr = 0
         self.size = 0
 
-        self.states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
         self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
-        self.next_states = torch.zeros((capacity, state_dim), dtype=torch.float32, device=device)
         self.next_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
     
-    def push(self, state, observation, action, reward, next_state, next_observation, done):
+    def push(self, observation, action, reward, next_observation, done):
         i = self.ptr
 
-        with torch.no_grad():
-            self.states[i] = torch.tensor(state, dtype=torch.float32, device=self.device)
-            self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
-            self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
-            self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-            self.next_states[i] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-            self.next_observations[i] = torch.tensor(next_observation, dtype=torch.float32, device=self.device)
-            self.dones[i] = torch.tensor([done], dtype=torch.float32, device=self.device)
+        self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
+        self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        self.next_observations[i] = torch.tensor(next_observation, dtype=torch.float32, device=self.device)
+        self.dones[i] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
         self.ptr = (self.ptr + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
@@ -119,7 +114,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
         # batch = random.sample(self.buffer, batch_size)
         indices = torch.randint(0, self.size, (batch_size,), device=self.device)
-        batch = (self.states[indices], self.observations[indices], self.actions[indices], self.rewards[indices], self.next_states[indices], self.next_observations[indices], self.dones[indices])
+        batch = (self.observations[indices], self.actions[indices], self.rewards[indices], self.next_observations[indices], self.dones[indices])
         return batch
 
 
@@ -144,8 +139,8 @@ class SACAgent:
         
         # Networks
         self.actor = PolicyNetwork(observation_dim, action_dim).to(self.device)
-        self.critic = QNetwork(state_dim, action_dim).to(self.device)
-        self.target_critic = QNetwork(state_dim, action_dim).to(self.device)
+        self.critic = QNetwork(observation_dim, action_dim).to(self.device)
+        self.target_critic = QNetwork(observation_dim, action_dim).to(self.device)
         
         # Target value network is the same as value network but with soft target updates
         self.target_critic.load_state_dict(self.critic.state_dict())
@@ -156,7 +151,7 @@ class SACAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
+        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
     
     def select_action(self, observation):
         observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
@@ -180,7 +175,7 @@ class SACAgent:
         #     next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
         #     done_batch = torch.FloatTensor(done_batch).to(self.device)
 
-        state_batch, observation_batch, action_batch, reward_batch, next_state_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
+        observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
         sampled_action, action_log_prob, std = self.actor.sample(observation_batch)
         
@@ -197,10 +192,10 @@ class SACAgent:
         # Critic update
         with torch.no_grad():
             sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_observation_batch)
-            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_state_batch, sampled_action_next)
+            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_observation_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
-        q1_value, q2_value = self.critic(state_batch, action_batch)
+        q1_value, q2_value = self.critic(observation_batch, action_batch)
         critic1_loss = F.mse_loss(q1_value, next_q_value)
         critic2_loss = F.mse_loss(q2_value, next_q_value)
         critic_loss = (critic1_loss + critic2_loss) / 2
@@ -210,7 +205,7 @@ class SACAgent:
         self.critic_optimizer.step()
 
         # Actor update
-        q1_pi, q2_pi = self.critic(state_batch, sampled_action)
+        q1_pi, q2_pi = self.critic(observation_batch, sampled_action)
         q_value_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
 

@@ -1,4 +1,4 @@
-import asac
+import sac
 import tr_env_gym
 
 import os
@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = asac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
+    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
 
     agent.lr = lr
     
@@ -33,7 +33,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
         writer = SummaryWriter(log_dir)
 
     while True:
-        state, observation = env.reset()[0]
+        _, observation = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -54,11 +54,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(observation)
-            next_state, next_observation, reward, done, _, info_env = env.step(action_scaled)
-            agent.replay_buffer.push(state, observation, action_scaled, reward, next_state, next_observation, done)
+            _, next_observation, reward, done, _, info_env = env.step(action_scaled)
+            agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
             info_agent = agent.update()
             
-            state = next_state
             observation = next_observation
             episode_reward += reward
             episode_forward_reward += info_env["reward_forward"]
@@ -119,7 +118,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = asac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
@@ -190,7 +189,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = asac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
