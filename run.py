@@ -1,4 +1,4 @@
-import gae_sac
+import ipe_sac
 import tr_env_gym
 from tensor_buffer import TensorBuffer
 import os
@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, latent_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
+    agent = ipe_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, latent_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
 
     agent.lr = lr
     agent.lr_GE = gre_lr
@@ -56,11 +56,11 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(obs_act_seq, observation)
+                action_scaled = agent.select_action(gt_log_intriparam, observation)
             next_state, next_observation, gt_log_intriparam, reward, done, _, info_env = env.step(action_scaled)
             next_obs_act = np.concatenate((next_observation, action_scaled))
             next_obs_act_seq = np.concatenate((obs_act_seq[1:], next_obs_act.reshape(1, -1)), axis=0)
-            agent.replay_buffer.push(state, observation, gt_log_intriparam, obs_act_seq, action_scaled, reward, next_state, next_observation, next_obs_act_seq, done)
+            agent.replay_buffer.push(state, observation, gt_log_intriparam, action_scaled, reward, next_state, next_observation, done)
             info_agent = agent.update()
             
             state = next_state
@@ -86,8 +86,6 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
                     critic_losses.append(info_agent["critic_loss"])
                     ent_coef_losses.append(info_agent["ent_coef_loss"])
                     ent_coefs.append(info_agent["ent_coef"])
-                    predict_losses.append(info_agent["predict_loss"])
-                    predict_errors.append(info_agent["predict_error"])
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
@@ -109,8 +107,6 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
             writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef_loss", np.array(ent_coef_losses).mean(), step_num)
             writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
-            writer.add_scalar("loss/predict_loss", np.array(predict_losses).mean(), step_num)
-            writer.add_scalar("loss/predict_error", np.array(predict_errors).mean(), step_num)
         writer.flush()
         if tb_step_recorder == "True":
             writer.close()
@@ -130,10 +126,10 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
 
 def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0]+env.intriparam_shape, env.action_space.shape[0]).to(device)
+    actor = ipe_sac.PolicyNetwork(env.observation_space.shape[0]+env.intriparam_shape, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    ge = gae_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.intriparam_shape).to(device)
+    ge = ipe_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.intriparam_shape).to(device)
     ge_state_dict = torch.load(path_to_ge, map_location=torch.device(device=device))
     ge.load_state_dict(ge_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
