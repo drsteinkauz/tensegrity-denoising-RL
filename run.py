@@ -89,7 +89,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
 
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-                torch.save(agent.gruautoencoder.state_dict(), os.path.join(model_dir, f"gruautoencoder_{step_num}.pth"))
+                torch.save(agent.intrinsic_parameter_encoder.state_dict(), os.path.join(model_dir, f"ipencoder_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
