@@ -188,7 +188,7 @@ class SACAgent:
         self.gamma = 0.99       # Discount factor
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
-        self.lr_GE = 1e-3       # Learning rate for GRUAutoEncoder
+        self.lr_GAE = 1e-3       # Learning rate for GRUAutoEncoder
         self.batch_size = 256    # Batch size
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
@@ -220,7 +220,7 @@ class SACAgent:
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
-        self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GE)
+        self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GAE)
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, intriparam_dim=intriparam_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)

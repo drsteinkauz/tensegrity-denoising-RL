@@ -1,6 +1,5 @@
 import gae_sac
 import tr_env_gym
-from tensor_buffer import TensorBuffer
 import os
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -128,17 +127,17 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     
     writer.close()
 
-def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
+def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0]+env.intriparam_shape, env.action_space.shape[0]).to(device)
+    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0]+8, env.action_space.shape[0]).to(device)
     actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
     actor.load_state_dict(actor_state_dict)
-    ge = gae_sac.GRUEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], feature_dim=env.intriparam_shape).to(device)
-    ge_state_dict = torch.load(path_to_ge, map_location=torch.device(device=device))
-    ge.load_state_dict(ge_state_dict)
+    gae = gae_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], latent_dim=8, output_dim=env.intriparam_shape).to(device)
+    gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
+    gae.load_state_dict(gae_state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    state, obs, obs_act_seq = env.reset()[0]
+    state, obs, gt_log_intriparam, obs_act_seq = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -153,46 +152,41 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
     y_pos_list = []
 
     predicted_friction_list = []
-    predicted_damping_s_list = []
     predicted_damping_c_list = []
-    predicted_stiffness_s_list = []
     predicted_stiffness_c_list = []
     friction_list = []
-    damping_s_list = []
     damping_c_list = []
-    stiffness_s_list = []
     stiffness_c_list = []
 
     obs_posi_list = []
     gt_posi_list = []
-    predicted_posi_list = []
-    tb  = TensorBuffer()
-    tb.to(device)
+    latent_list = []
     iter = int(simulation_seconds/dt)
     for i in range(iter):
-        predicted_intriparam = ge.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
-        # tb.add_tensor(predicted_intriparam)
-        # predicted_intriparam = tb.sample()
-        # gt_intriparam = torch.from_numpy(state[-3:]).detach().float().to(device).unsqueeze(0)
-        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), predicted_intriparam], dim=-1)
+        latent = gae.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
+        feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), latent], dim=-1)
         # feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), gt_intriparam], dim=-1)
-        action_scaled, _ = actor.predict(feature)
+        # action_scaled, _ = actor.predict(feature)
+        action_scaled, _ = actor.forward(feature)
+        action_scaled = torch.tanh(action_scaled)
         action_scaled = action_scaled.flatten().detach().cpu().numpy()
-        state, obs, _, done, _, info = env.step(action_scaled)
+        state, obs, gt_log_intriparam, _, done, _, info = env.step(action_scaled)
 
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
 
+        predicted_intriparam = gae.decode(latent) * torch.log(torch.tensor(env.intriparam_dist[:, 1]).to(device))
         predicted_intriparam_numpy = predicted_intriparam.detach().cpu().numpy()
         predicted_friction_list.append(predicted_intriparam_numpy[0][-3])
         predicted_damping_c_list.append(predicted_intriparam_numpy[0][-2])
         predicted_stiffness_c_list.append(predicted_intriparam_numpy[0][-1])
-        friction_list.append(state[-3])
-        damping_c_list.append(state[-2])
-        stiffness_c_list.append(state[-1])
+        friction_list.append(gt_log_intriparam[0])
+        damping_c_list.append(gt_log_intriparam[1])
+        stiffness_c_list.append(gt_log_intriparam[2])
 
         obs_posi_list.append(obs[:18])
         gt_posi_list.append(state[:18])
+        latent_list.append(latent.detach().cpu().numpy()[0])
 
         actions_list.append(action_scaled)
         #the tendon lengths are the last 9 observations
@@ -241,6 +235,7 @@ def test(env, path_to_actor, path_to_ge, saved_data_dir, simulation_seconds):
 
     np.save(os.path.join(saved_data_dir, "obs_posi_data.npy"),np.array(obs_posi_list))
     np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
+    np.save(os.path.join(saved_data_dir, "latent_data.npy"),np.array(latent_list))
 
 
 # Training loop
@@ -319,6 +314,6 @@ if __name__ == "__main__":
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_actor=args.test[0], path_to_ge=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_actor=args.test[0], path_to_gae=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
