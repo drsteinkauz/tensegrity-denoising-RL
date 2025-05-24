@@ -180,7 +180,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, latent_dim, intriparam_dim, intriparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, latent_dim, intriparam_dim, intriparam_std, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -198,7 +198,7 @@ class SACAgent:
 
         self.intriparam_dim = intriparam_dim
         with torch.no_grad():
-            self.intriparam_std = torch.tensor(intriparam_dist[:,1], dtype=torch.float32, device=self.device).view(1, -1).detach()
+            self.intriparam_std = torch.tensor(intriparam_std, dtype=torch.float32, device=self.device).view(1, -1).detach()
             # shape: (1, intriparam_dim)
 
         # self.alpha = 1          # Entropy coefficient # 0.2

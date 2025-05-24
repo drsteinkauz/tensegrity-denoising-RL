@@ -15,7 +15,7 @@ def train(env, log_dir, model_dir, lr, gre_lr=1e-3, gpu_idx=None, tb_step_record
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, latent_dim=8, intriparam_dim=env.intriparam_shape, intriparam_dist=env.intriparam_dist, device=device)
+    agent = gae_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, latent_dim=8, intriparam_dim=env.intriparam_shape, intriparam_std=env.intriparam_std, device=device)
 
     agent.lr = lr
     agent.lr_GE = gre_lr
@@ -175,7 +175,7 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
         obs_act = np.concatenate((obs, action_scaled))
         obs_act_seq = np.concatenate((obs_act_seq[1:], obs_act.reshape(1, -1)), axis=0)
 
-        predicted_intriparam = gae.decode(latent) * torch.log(torch.tensor(env.intriparam_dist[:, 1]).to(device))
+        predicted_intriparam = gae.decode(latent) * torch.log(torch.tensor(env.intriparam_std).to(device))
         predicted_intriparam_numpy = predicted_intriparam.detach().cpu().numpy()
         predicted_friction_list.append(predicted_intriparam_numpy[0][-3])
         predicted_damping_c_list.append(predicted_intriparam_numpy[0][-2])
