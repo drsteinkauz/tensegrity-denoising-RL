@@ -33,7 +33,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
         writer = SummaryWriter(log_dir)
 
     while True:
-        _, observation = env.reset()[0]
+        _, observation, _, _ = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -54,7 +54,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(observation)
-            _, next_observation, reward, done, _, info_env = env.step(action_scaled)
+            _, next_observation, _, reward, done, _, info_env = env.step(action_scaled)
             agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
             info_agent = agent.update()
             
@@ -124,7 +124,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs = env.reset()[0]
+    _, obs, _, _ = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -144,7 +144,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled.detach() * 0.05
-        _, obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        _, obs, _, _, done, _, info = env.step(action_scaled.detach().numpy())
 
 
 
@@ -201,7 +201,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
     if env._desired_action == "tracking":
         waypt_list = []
     for i in range(group_num):
-        _, obs = env.reset()[0]
+        _, obs, _, _ = env.reset()[0]
         done = False
         extra_steps = 500
 
@@ -211,7 +211,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
             # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
             action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
             action_scaled = torch.tanh(action_scaled)
-            _, obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+            _, obs, _, _, done, _, info = env.step(action_scaled.detach().numpy())
 
             if done:
                 extra_steps -= 1
