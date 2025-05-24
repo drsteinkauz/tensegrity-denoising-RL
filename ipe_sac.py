@@ -190,7 +190,7 @@ class ReplayBuffer:
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, latent_dim, intriparam_dim, intriparam_dist, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, action_dim, latent_dim, intriparam_dim, intriparam_std, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -208,7 +208,7 @@ class SACAgent:
 
         self.intriparam_dim = intriparam_dim
         with torch.no_grad():
-            self.intriparam_std = torch.tensor(intriparam_dist[:,1], dtype=torch.float32, device=self.device).view(1, -1).detach()
+            self.intriparam_std = torch.tensor(intriparam_std, dtype=torch.float32, device=self.device).view(1, -1).detach()
             # shape: (1, intriparam_dim)
 
         # self.alpha = 1          # Entropy coefficient # 0.2
@@ -280,13 +280,15 @@ class SACAgent:
         with torch.no_grad():
             next_feature_obs_batch = torch.cat([next_observation_batch, latent_batch], dim=-1)
             sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_feature_obs_batch)
-            # next_feature_state_batch = torch.cat([next_state_batch, latent_batch], dim=-1)
-            # q1_target_next_pi, q2_target_next_pi = self.target_critic(next_feature_state_batch, sampled_action_next)
-            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_feature_obs_batch, sampled_action_next)
+            next_feature_state_batch = torch.cat([next_state_batch, latent_batch], dim=-1)
+            q1_target_next_pi, q2_target_next_pi = self.target_critic(next_feature_state_batch, sampled_action_next)
+            # q1_target_next_pi, q2_target_next_pi = self.target_critic(next_feature_obs_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
-            # feature_state_batch = torch.cat([state_batch, latent_batch], dim=-1)
-        q1_value, q2_value = self.critic(feature_obs_batch.detach(), action_batch)
+            feature_state_batch = torch.cat([state_batch, latent_batch], dim=-1)
+            # feature_obs_batch_q = torch.cat([observation_batch, latent_batch], dim=-1)
+        q1_value, q2_value = self.critic(feature_state_batch, action_batch)
+        # q1_value, q2_value = self.critic(feature_obs_batch_q, action_batch)
         critic1_loss = F.mse_loss(q1_value, next_q_value)
         critic2_loss = F.mse_loss(q2_value, next_q_value)
         critic_loss = (critic1_loss + critic2_loss) / 2
@@ -296,7 +298,8 @@ class SACAgent:
         self.critic_optimizer.step()
         
         # Actor update
-        q1_pi, q2_pi = self.critic(feature_obs_batch, sampled_action)
+        q1_pi, q2_pi = self.critic(feature_state_batch, sampled_action)
+        # q1_pi, q2_pi = self.critic(feature_obs_batch, sampled_action)
         q_value_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
 
