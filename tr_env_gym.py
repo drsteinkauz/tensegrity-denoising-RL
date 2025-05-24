@@ -30,7 +30,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_contact_forces=False,
         use_tendon_length=False,
         use_cap_velocity=True,
-        use_stability_detection=True,
+        use_stability_detection=False,
         use_obs_noise=False,
         use_intrinsic_params_dr=True,
         terminate_when_unhealthy=True,
@@ -756,15 +756,15 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         return filtered_action
 
     def _reset_intrinsic_params(self):
-        rand_ihpr = np.random.uniform(-1, 1, size=(self.intriparam_shape,))
+        rand_itpr = np.random.uniform(-1, 1, size=(self.intriparam_shape,))
 
-        friction_coeff = np.exp(rand_ihpr[0] * np.log(self._friction_noise_dist[1])) * self._friction_noise_dist[0]
-        damping_coeff = np.exp(rand_ihpr[1:4] * np.log(self._damping_noise_dist_cross[1])) * self._damping_noise_dist_cross[0]
-        stiffness_coeff = np.exp(rand_ihpr[4:7] * np.log(self._stiffness_noise_dist_cross[1])) * self._stiffness_noise_dist_cross[0]
-        mass_coeff = np.exp(rand_ihpr[7:10] * np.log(self._mass_noise_dist[1])) * self._mass_noise_dist[0]
-        inertia_coeff = np.array([np.exp(rand_ihpr[7] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
-                                  np.exp(rand_ihpr[8] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
-                                  np.exp(rand_ihpr[9] * np.log(self._mass_noise_dist[1])) * self._inertia_mean])
+        friction_coeff = np.exp(rand_itpr[0] * np.log(self._friction_noise_dist[1])) * self._friction_noise_dist[0]
+        damping_coeff = np.exp(rand_itpr[1:4] * np.log(self._damping_noise_dist_cross[1])) * self._damping_noise_dist_cross[0]
+        stiffness_coeff = np.exp(rand_itpr[4:7] * np.log(self._stiffness_noise_dist_cross[1])) * self._stiffness_noise_dist_cross[0]
+        mass_coeff = np.exp(rand_itpr[7:10] * np.log(self._mass_noise_dist[1])) * self._mass_noise_dist[0]
+        inertia_coeff = np.array([np.exp(rand_itpr[7] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
+                                  np.exp(rand_itpr[8] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
+                                  np.exp(rand_itpr[9] * np.log(self._mass_noise_dist[1])) * self._inertia_mean])
 
         if self._robot_type == "w":
             self.model.geom_friction[:, 0] = friction_coeff
