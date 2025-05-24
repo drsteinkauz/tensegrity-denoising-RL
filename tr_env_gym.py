@@ -249,7 +249,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self.intriparam_shape = 7 # 3 for friction coefficient, damping of cross, stiffness of cross
         self.intriparam_dist = np.array([[self._friction_noise_dist[0], self._friction_noise_dist[1]],
                                          [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
-                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]]])
+                                         [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
+                                         [self._damping_noise_dist_cross[0], self._damping_noise_dist_cross[1]],
+                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]],
+                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]],
+                                         [self._stiffness_noise_dist_cross[0], self._stiffness_noise_dist_cross[1]],])
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
