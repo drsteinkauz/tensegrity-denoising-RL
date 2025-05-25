@@ -269,7 +269,7 @@ def group_test(env, path_to_actor, path_to_ipe, saved_data_dir, simulation_secon
     xy_pos_array = np.array(xy_pos_list) - oript_array
     iniyaw_array = np.array(iniyaw_list)
     if env._desired_action == "tracking":
-        waypt_array = np.array(waypt_list)
+        waypt_array = np.array(waypt_list) - oript_array
 
     for i in range(group_num):
         iniyaw_ang = iniyaw_list[i][0]
@@ -279,7 +279,7 @@ def group_test(env, path_to_actor, path_to_ipe, saved_data_dir, simulation_secon
             waypt_array[i] = np.dot(rot_mat, waypt_array[i].T).T
     np.save(os.path.join(saved_data_dir, "group_xy_pos_data.npy"),xy_pos_array)
     if env._desired_action == "tracking":
-        np.save(os.path.join(saved_data_dir, "grout_waypt_data.npy"),waypt_array)
+        np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
 
 
 # Training loop
