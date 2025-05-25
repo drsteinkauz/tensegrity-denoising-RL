@@ -125,7 +125,7 @@ class GRUAutoEncoder(nn.Module):
 
 # Replay buffer class
 class ReplayBuffer:
-    def __init__(self, capacity, state_dim, obs_dim, intriparam_dim, action_dim, obs_act_seq_len=64, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, capacity, state_dim, obs_dim, intriparam_dim, action_dim, obs_act_seq_len=32, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         self.capacity = capacity
         self.device = device
         self.ptr = 0
@@ -193,7 +193,7 @@ class SACAgent:
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
-        self.lambda_for_GAE = 0.1
+        self.lambda_for_GAE = 0.005
         self.decoder_scaled_output = False
 
         self.intriparam_dim = intriparam_dim
@@ -223,7 +223,7 @@ class SACAgent:
         self.gruautoencoder_optimizer = optim.Adam(self.gruautoencoder.parameters(), lr=self.lr_GAE)
         
         # Replay buffer
-        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, intriparam_dim=intriparam_dim, action_dim=action_dim, obs_act_seq_len=64, device=self.device)
+        self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, state_dim=state_dim, obs_dim=observation_dim, intriparam_dim=intriparam_dim, action_dim=action_dim, obs_act_seq_len=32, device=self.device)
     
     def select_action(self, obs_act_seq, observation):
         obs_act_seq = torch.FloatTensor(obs_act_seq).to(self.device).unsqueeze(0)

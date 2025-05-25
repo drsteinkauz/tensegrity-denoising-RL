@@ -60,11 +60,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         friction_noise_dist_w = (1.0, 4.0),
         damping_noise_dist_cross_w = (10.0, 4.0),
         stiffness_noise_dist_cross_w = (150.0, 2.0),
-        mass_noise_dist_w = (0.1334, 2.0),
+        mass_noise_dist_w = (0.1334, 4.0),
         friction_noise_dist_j = (1.0, 4.0),
         damping_noise_dist_cross_j = (100.0, 4.0),
         stiffness_noise_dist_cross_j = (700.0, 2.0),
-        mass_noise_dist_j = (4.0, 2.0),
+        mass_noise_dist_j = (4.0, 4.0),
         obs_noise_tendon_stdev_w = 0.02,
         obs_noise_cap_pos_stdev_w = 0.01,
         obs_noise_tendon_stdev_j = 0.02,
@@ -954,7 +954,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._ang_vel_cmd = 0.0
                 
         obs_act_seq = []
-        for i in range(64):
+        for i in range(32):
             self.do_simulation(tendons, self.frame_skip)
             _, observation, _ = self._get_obs()
             action = self.data.ctrl[:].copy()
