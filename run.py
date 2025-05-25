@@ -237,6 +237,65 @@ def test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds):
     np.save(os.path.join(saved_data_dir, "gt_posi_data.npy"),np.array(gt_posi_list))
     np.save(os.path.join(saved_data_dir, "latent_data.npy"),np.array(latent_list))
 
+def group_test(env, path_to_actor, path_to_gae, saved_data_dir, simulation_seconds, group_num):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    actor = gae_sac.PolicyNetwork(env.observation_space.shape[0]+8, env.action_space.shape[0]).to(device)
+    actor_state_dict = torch.load(path_to_actor, map_location=torch.device(device=device))
+    actor.load_state_dict(actor_state_dict)
+    gae = gae_sac.GRUAutoEncoder(input_dim=env.observation_space.shape[0]+env.action_space.shape[0], latent_dim=8, output_dim=env.intriparam_shape).to(device)
+    gae_state_dict = torch.load(path_to_gae, map_location=torch.device(device=device))
+    gae.load_state_dict(gae_state_dict)
+    os.makedirs(saved_data_dir, exist_ok=True)
+
+    oript_list = []
+    xy_pos_list = []
+    iniyaw_list = []
+    if env._desired_action == "tracking":
+        waypt_list = []
+    
+    for i in range(group_num):
+        state, obs, gt_log_intriparam, obs_act_seq = env.reset()[0]
+        done = False
+        extra_steps = 500
+
+        dt = env.dt
+        iter = int(simulation_seconds/dt)
+        for j in range(iter):
+            latent = gae.encode(torch.from_numpy(np.array([obs_act_seq])).float().to(device))
+            feature = torch.cat([torch.FloatTensor(obs).to(device).unsqueeze(0), latent], dim=-1)
+            # action_scaled = actor.predict(feature)
+            action_scaled, _ = actor.forward(feature)
+            action_scaled = torch.tanh(action_scaled)
+            action_scaled = action_scaled.flatten().detach().cpu().numpy()
+            state, obs, gt_log_intriparam, _, done, _, info = env.step(action_scaled)
+
+            if done:
+                extra_steps -= 1
+                if extra_steps < 0:
+                    break
+
+        if env._desired_action == "tracking":
+            waypt_list.append(np.array(env._waypt))
+
+        oript_list.append(np.array(env._oripoint))
+        xy_pos_list.append(np.array([info["x_position"], info["y_position"]]))
+        iniyaw_list.append(np.array([env._reset_psi]))
+    
+    oript_array = np.array(oript_list)
+    xy_pos_array = np.array(xy_pos_list) - oript_array
+    iniyaw_array = np.array(iniyaw_list)
+    if env._desired_action == "tracking":
+        waypt_array = np.array(waypt_list) - oript_array
+
+    for i in range(group_num):
+        iniyaw_ang = iniyaw_list[i][0]
+        rot_mat = np.array([[np.cos(iniyaw_ang), np.sin(iniyaw_ang)], [-np.sin(iniyaw_ang), np.cos(iniyaw_ang)]])
+        xy_pos_array[i] = np.dot(rot_mat, xy_pos_array[i].T).T
+        if env._desired_action == "tracking":
+            waypt_array[i] = np.dot(rot_mat, waypt_array[i].T).T
+    np.save(os.path.join(saved_data_dir, "group_xy_pos_data.npy"),xy_pos_array)
+    if env._desired_action == "tracking":
+        np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
 
 # Training loop
 if __name__ == "__main__":
@@ -246,7 +305,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--test', metavar='path_to_model', nargs=2)
-    parser.add_argument('--test3', metavar='path_to_model', nargs=3)
+    parser.add_argument('--group_test', metavar='path_to_model', nargs=2)
     parser.add_argument('--tracking_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
     parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
@@ -308,7 +367,7 @@ if __name__ == "__main__":
 
     if(args.test):
         if os.path.isfile(args.test[0]) and os.path.isfile(args.test[1]):
-            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
+            gymenv = tr_env_gym.tr_env_gym(render_mode='human',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         robot_type=robot_type,
                                         is_test = True,
@@ -317,3 +376,15 @@ if __name__ == "__main__":
             test(gymenv, path_to_actor=args.test[0], path_to_gae=args.test[1], saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
+
+    if(args.group_test):
+        if os.path.isfile(args.group_test[0]) and os.path.isfile(args.group_test[1]):
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
+                                        xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        robot_type=robot_type,
+                                        is_test = True,
+                                        desired_action = args.desired_action,
+                                        desired_direction = args.desired_direction)
+            group_test(gymenv, path_to_actor=args.group_test[0], path_to_gae=args.group_test[1], saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
+        else:
+            print(f'{args.group_test} not found.')
