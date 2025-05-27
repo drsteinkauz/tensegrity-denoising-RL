@@ -84,6 +84,17 @@ class PolicyNetwork(nn.Module):
     def to(self, device):
         self.device = device
         return super(PolicyNetwork, self).to(device)
+    
+class PolicyNetwork_HL(nn.Module):
+    def __init__(self, observation_dim, target_dim):
+        super(PolicyNetwork_HL, self).__init__()
+        self.p = MLP(observation_dim, target_dim)
+
+        self.apply(weights_init_)
+    
+    def forward(self, observation):
+        target = self.p(observation)
+        return target
 
 # Replay buffer class
 class ReplayBuffer:
@@ -94,15 +105,17 @@ class ReplayBuffer:
         self.size = 0
 
         self.observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
+        self.hier_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((capacity, action_dim), dtype=torch.float32, device=device)
         self.rewards = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
         self.next_observations = torch.zeros((capacity, obs_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((capacity, 1), dtype=torch.float32, device=device)
     
-    def push(self, observation, action, reward, next_observation, done):
+    def push(self, observation, hier_observation, action, reward, next_observation, done):
         i = self.ptr
 
         self.observations[i] = torch.tensor(observation, dtype=torch.float32, device=self.device)
+        self.hier_observations[i] = torch.tensor(hier_observation, dtype=torch.float32, device=self.device)
         self.actions[i] = torch.tensor(action, dtype=torch.float32, device=self.device)
         self.rewards[i] = torch.tensor([reward], dtype=torch.float32, device=self.device)
         self.next_observations[i] = torch.tensor(next_observation, dtype=torch.float32, device=self.device)
@@ -114,13 +127,13 @@ class ReplayBuffer:
     def sample(self, batch_size):
         # batch = random.sample(self.buffer, batch_size)
         indices = torch.randint(0, self.size, (batch_size,), device=self.device)
-        batch = (self.observations[indices], self.actions[indices], self.rewards[indices], self.next_observations[indices], self.dones[indices])
+        batch = (self.observations[indices], self.hier_observations[indices], self.actions[indices], self.rewards[indices], self.next_observations[indices], self.dones[indices])
         return batch
 
 
 # SAC Agent class
 class SACAgent:
-    def __init__(self, state_dim, observation_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    def __init__(self, state_dim, observation_dim, target_dim, action_dim, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
         # Device
         self.device = device
 
@@ -138,7 +151,8 @@ class SACAgent:
         self._target_entropy = -action_dim
         
         # Networks
-        self.actor = PolicyNetwork(observation_dim, action_dim).to(self.device)
+        self.actor_HL = PolicyNetwork_HL(observation_dim, target_dim).to(self.device)
+        self.actor = PolicyNetwork(observation_dim+target_dim, action_dim).to(self.device)
         self.critic = QNetwork(observation_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(observation_dim, action_dim).to(self.device)
         
@@ -147,16 +161,20 @@ class SACAgent:
         
         # Optimizers
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
+        self.actor_HL_optimizer = optim.Adam(self.actor_HL.parameters(), lr=self.lr)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
     
-    def select_action(self, observation):
+    def select_action(self, observation, hier_observation):
         observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
+        hier_observation = torch.FloatTensor(hier_observation).to(self.device).unsqueeze(0)
         with torch.no_grad():
-            action, _, _ = self.actor.sample(observation)
+            target = self.actor_HL(hier_observation)
+            hbr_observation = torch.cat((observation, target), dim=-1)
+            action, _, _ = self.actor.sample(hbr_observation)
         return action.squeeze(0).cpu().numpy()
     
     def update(self):
@@ -175,9 +193,11 @@ class SACAgent:
         #     next_observation_batch = torch.FloatTensor(next_observation_batch).to(self.device)
         #     done_batch = torch.FloatTensor(done_batch).to(self.device)
 
-        observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
+        observation_batch, hier_observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
 
-        sampled_action, action_log_prob, std = self.actor.sample(observation_batch)
+        target_batch = self.actor_HL(hier_observation_batch)
+        hbr_observation_batch = torch.cat((observation_batch, target_batch), dim=-1)
+        sampled_action, action_log_prob, std = self.actor.sample(hbr_observation_batch)
         
         self.alpha = torch.exp(self.log_ent_coef).detach().item()
         # self.alpha = 0.0001
@@ -191,7 +211,9 @@ class SACAgent:
 
         # Critic update
         with torch.no_grad():
-            sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_observation_batch)
+            next_target_batch = self.actor_HL(next_observation_batch)
+            next_hbr_observation_batch = torch.cat((next_observation_batch, next_target_batch), dim=-1)
+            sampled_action_next, action_log_prob_next, _ = self.actor.sample(next_hbr_observation_batch)
             q1_target_next_pi, q2_target_next_pi = self.target_critic(next_observation_batch, sampled_action_next)
             q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
             next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
@@ -209,8 +231,10 @@ class SACAgent:
         q_value_pi = torch.min(q1_pi, q2_pi)
         actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
 
+        self.actor_HL_optimizer.zero_grad()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        self.actor_HL_optimizer.step()
         self.actor_optimizer.step()
 
         # Soft target update

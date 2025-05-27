@@ -1,4 +1,4 @@
-import sac
+import hier_sac
 import tr_env_gym
 
 import os
@@ -16,7 +16,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
+    agent = hier_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, target_dim=8, action_dim=action_dim, device=device)
 
     agent.lr = lr
     
@@ -26,6 +26,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     TIMESTEPS = 100000
     step_num = 0
     eps_num = 0
+    hier_skip_steps = 50
 
     if tb_step_recorder == "True":
         writer = None
@@ -38,6 +39,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
         episode_len = 0
         episode_forward_reward = 0
         episode_ctrl_reward = 0
+        hier_observation = observation.copy()
 
         if tb_step_recorder == "True":
             writer = SummaryWriter(log_dir)
@@ -53,9 +55,11 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
             if step_num < agent.warmup_steps:
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
-                action_scaled = agent.select_action(observation)
+                action_scaled = agent.select_action(observation, hier_observation)
             _, next_observation, _, reward, done, _, info_env = env.step(action_scaled)
-            agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
+            if episode_len % hier_skip_steps == 0:
+                hier_observation = next_observation.copy()
+            agent.replay_buffer.push(observation, hier_observation, action_scaled, reward, next_observation, done)
             info_agent = agent.update()
             
             observation = next_observation
@@ -118,7 +122,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = hier_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
@@ -189,7 +193,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = hier_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
