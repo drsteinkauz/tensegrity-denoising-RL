@@ -1,4 +1,4 @@
-import sac
+import gnn_sac
 import tr_env_gym
 
 import os
@@ -16,7 +16,11 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     state_dim = env.state_shape
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
+    if env._desired_action == "tracking":
+        global_obs_dim = 2
+    else:
+        global_obs_dim = 0
+    agent = gnn_sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, global_obs_dim=global_obs_dim, graph_type=env._robot_type, device=device)
 
     agent.lr = lr
     
@@ -118,7 +122,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
@@ -189,7 +193,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
