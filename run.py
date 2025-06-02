@@ -1,6 +1,9 @@
 import gnn_sac
 import tr_env_gym
 
+import json
+from datetime import datetime
+
 import os
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -8,7 +11,24 @@ import argparse
 import numpy as np
 import time
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
+def save_args_to_json(args, filename=None):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder_name = f"results_{timestamp}"
+    
+    os.makedirs(folder_name, exist_ok=True)
+    
+    if filename is None:
+        filename = f"config.json"
+    
+    filepath = os.path.join(folder_name, filename)
+    
+    with open(filepath, 'w') as f:
+        json.dump(vars(args), f, indent=4)
+    
+    print(f"配置已保存到: {filepath}")
+    return timestamp
+
+def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",starting_point=None):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -24,6 +44,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
     agent.lr = lr
     
+    if starting_point is not None:
+        agent.load(starting_point,load_replay_buffer=True)
+
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
@@ -85,7 +108,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                     ent_coefs.append(info_agent["ent_coef"])
 
             if step_num % TIMESTEPS == 0:
-                torch.save(agent.gnn_actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+                agent.save(os.path.join(model_dir, f"actor_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
@@ -98,6 +121,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
         writer.add_scalar("ep/ep_len", episode_len, eps_num)
         writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
         writer.add_scalar("ep/train_speed", train_speed, step_num)
+        writer.add_scalar("ep/step_num",step_num,eps_num)
         if tb_step_recorder == "False":
             writer.add_scalar("loss/actor_loss", np.array(actor_losses).mean(), step_num)
             writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
@@ -269,10 +293,10 @@ if __name__ == "__main__":
     parser.add_argument('--contact_with_self_penatly', default= 0.0, type=float,
                         help="The penalty multiplied by the total contact between bars, which is then subtracted from the reward.\
                         By default this is 0.0, meaning there is no penalty for contact.")
-    parser.add_argument('--log_dir', default="logs", type=str,
-                        help="The directory where the training logs will be saved")
-    parser.add_argument('--model_dir', default="models", type=str,
-                        help="The directory where the trained models will be saved")
+    # parser.add_argument('--log_dir', default="logs", type=str,
+    #                     help="The directory where the training logs will be saved")
+    # parser.add_argument('--model_dir', default="models", type=str,
+    #                     help="The directory where the trained models will be saved")
     parser.add_argument('--saved_data_dir', default="saved_data", type=str)
     parser.add_argument('--simulation_seconds', default=30, type=int,
                          help="time in seconds to run simulation when testing, default is 30 seconds")
@@ -294,6 +318,9 @@ if __name__ == "__main__":
         args.env_xml = "3prism_jonathan_steady_side.xml"
         robot_type = "j"
 
+    timestamp = save_args_to_json(args)
+    args.log_dir = f"results_{timestamp}/logs"
+    args.model_dir = f"results_{timestamp}/models"
     if args.train:
         gymenv = tr_env_gym.tr_env_gym(render_mode="None",
                                     xml_file=os.path.join(os.getcwd(),args.env_xml),
