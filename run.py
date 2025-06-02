@@ -25,7 +25,7 @@ def save_args_to_json(args, filename=None):
     with open(filepath, 'w') as f:
         json.dump(vars(args), f, indent=4)
     
-    print(f"配置已保存到: {filepath}")
+    print(f"configs are saved to: {filepath}")
     return timestamp
 
 def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",starting_point=None):
