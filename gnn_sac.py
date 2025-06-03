@@ -115,7 +115,7 @@ class QNetwork(nn.Module):
 
 
 class GNNPolicyNetwork(nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim=64):
+    def __init__(self, node_dim, edge_dim, hidden_dim=128):
         super(GNNPolicyNetwork, self).__init__()
         self.gnn1 = GNNEncoder(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.gnn2 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
@@ -210,7 +210,7 @@ class SACAgent:
         # Hyperparameters
         self.gamma = 0.99       # Discount factor
         self.tau = 0.005        # Soft target update factor
-        self.lr = 2e-4          # Learning rate
+        self.lr = 3e-4          # Learning rate
         self.batch_size = 128    # Batch size
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
@@ -276,7 +276,7 @@ class SACAgent:
         if self.replay_buffer.size < self.batch_size:
             return
         
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
             
 
