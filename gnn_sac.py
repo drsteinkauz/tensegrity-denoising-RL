@@ -115,7 +115,7 @@ class QNetwork(nn.Module):
 
 
 class GNNPolicyNetwork(nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim=128):
+    def __init__(self, node_dim, edge_dim, hidden_dim=64):
         super(GNNPolicyNetwork, self).__init__()
         self.gnn1 = GNNEncoder(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.gnn2 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
@@ -210,8 +210,8 @@ class SACAgent:
         # Hyperparameters
         self.gamma = 0.99       # Discount factor
         self.tau = 0.005        # Soft target update factor
-        self.lr = 3e-4          # Learning rate
-        self.batch_size = 256    # Batch size
+        self.lr = 2e-4          # Learning rate
+        self.batch_size = 128    # Batch size
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
@@ -276,9 +276,10 @@ class SACAgent:
         if self.replay_buffer.size < self.batch_size:
             return
         
-        observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
-        
-        with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
+        with torch.cuda.amp.autocast():
+            observation_batch, action_batch, reward_batch, next_observation_batch, done_batch = self.replay_buffer.sample(self.batch_size)
+            
+
             nodes_batch, edge_attr_batch = self._obs_to_graph_input(observation_batch)
             nodes_next_batch, edge_attr_next_batch = self._obs_to_graph_input(next_observation_batch)
             
@@ -287,7 +288,6 @@ class SACAgent:
             )
             
             self.alpha = torch.exp(self.log_ent_coef).detach().item()
-            
             ent_coef_loss = -(self.log_ent_coef * (action_log_prob + self._target_entropy).detach()).mean()
             
             # Critic update
@@ -299,7 +299,9 @@ class SACAgent:
                 q1_target_next_pi, q2_target_next_pi = self.target_critic(next_observation_batch, sampled_action_next)
                 q_target_next_pi = torch.min(q1_target_next_pi, q2_target_next_pi)
                 
-                next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (q_target_next_pi - self.alpha * action_log_prob_next)
+                next_q_value = reward_batch.view(-1, 1) + self.gamma * (1 - done_batch.view(-1, 1)) * (
+                    q_target_next_pi - self.alpha * action_log_prob_next
+                )
             
             q1_value, q2_value = self.critic(observation_batch, action_batch)
             critic1_loss = F.mse_loss(q1_value, next_q_value)
@@ -312,16 +314,18 @@ class SACAgent:
             actor_loss = (self.alpha * action_log_prob - q_value_pi).mean()
         
         self.ent_coef_optimizer.zero_grad()
-        self.scaler.scale(ent_coef_loss).backward()
-        self.scaler.step(self.ent_coef_optimizer)
+        ent_coef_loss.backward()
+        self.ent_coef_optimizer.step()
         
         self.critic_optimizer.zero_grad()
         self.scaler.scale(critic_loss).backward()
+        self.scaler.unscale_(self.critic_optimizer)
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.scaler.step(self.critic_optimizer)
         
         self.gnn_actor_optimizer.zero_grad()
         self.scaler.scale(actor_loss).backward()
+        self.scaler.unscale_(self.gnn_actor_optimizer)
         torch.nn.utils.clip_grad_norm_(self.gnn_actor.parameters(), max_norm=1.0)
         self.scaler.step(self.gnn_actor_optimizer)
         

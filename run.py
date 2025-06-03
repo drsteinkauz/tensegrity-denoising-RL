@@ -148,6 +148,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
@@ -219,6 +220,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
@@ -304,6 +306,7 @@ if __name__ == "__main__":
                         help="learning rate for SAC, default is 3e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
+    parser.add_argument("--reward_type",default="Cone", type = str,choices=["Cone", "Hybrid","Banana","Ditch"])
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -328,7 +331,8 @@ if __name__ == "__main__":
                                     is_test = False,
                                     desired_action = args.desired_action,
                                     desired_direction = args.desired_direction,
-                                    terminate_when_unhealthy = terminate_when_unhealthy)
+                                    terminate_when_unhealthy = terminate_when_unhealthy,
+                                    reward_type = args.reward_type)
         if args.starting_point and os.path.isfile(args.starting_point):
             train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
         else:
@@ -341,7 +345,8 @@ if __name__ == "__main__":
                                         robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
-                                        desired_direction = args.desired_direction)
+                                        desired_direction = args.desired_direction,
+                                        reward_type = args.reward_type)
             test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
         else:
             print(f'{args.test} not found.')
@@ -353,7 +358,8 @@ if __name__ == "__main__":
                                         robot_type=robot_type,
                                         is_test = True,
                                         desired_action = args.desired_action,
-                                        desired_direction = args.desired_direction)
+                                        desired_direction = args.desired_direction,
+                                        reward_type = args.reward_type)
             group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
         else:
             print(f'{args.group_test} not found.')

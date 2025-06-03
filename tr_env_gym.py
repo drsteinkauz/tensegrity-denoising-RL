@@ -75,7 +75,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         iniyaw_bias_j = np.pi/10,
         way_pts_range_j = (3.0, 3.0),
         way_pts_angle_range_j = (-np.pi/12, np.pi/12),
-        ditch_reward_max=200,
+        ditch_reward_max=150,
         ditch_reward_stdev_w=0.05,
         ditch_reward_stdev_j=0.15,
         waypt_reward_amplitude=50,
@@ -84,6 +84,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         threshold_waypt = 0.05,
         forrew_rate_w=3.0,
         forrew_rate_j=1.0,
+        reward_type = "Cone",
         **kwargs
     ):
         utils.EzPickle.__init__(
@@ -161,7 +162,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._min_reset_heading = min_reset_heading
         self._max_reset_heading = max_reset_heading
         self._robot_type = robot_type
-        
+        self.reward_type = reward_type
         self._oripoint = None
         self._threshold_waypt = threshold_waypt
         self._ditch_reward_max = ditch_reward_max
@@ -695,26 +696,41 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         else:
             return theta
     
-    def _ditch_reward(self, xy_position):
+    def _ditch_reward(self, xy_position,step = None):
         pointing_vec = self._waypt - self._oripoint
         dist_pointing = np.linalg.norm(pointing_vec)
         pointing_vec_norm = pointing_vec / dist_pointing
 
         tracking_vec = self._waypt - xy_position
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
-        # dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+        if self.reward_type == "Cone":
+            dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+            ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+            waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        elif self.reward_type == "Banana":
+            if self._robot_type == "w":
+                center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
 
-        # ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
-        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        # if self._robot_type == "w":
-        #     center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
-
-        #     ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
-        #     waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
-        waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+                ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
+                waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+            else:
+                raise TypeError("banana reward for Jonathan is not defined")
+        elif self.reward_type == "Ditch":
+            ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+            waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        elif self.reward_type == "Hybrid":
+            Tempreture = 5e6
+            dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+            ditch_rew1 = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+            ditch_rew2 = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+            if step<Tempreture:
+                fct = step/Tempreture
+                ditch_rew = ditch_rew1*(1-fct)+ditch_rew2*fct
+            else:
+                ditch_rew = ditch_rew2
+            waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        else:
+            raise TypeError("This error serves as a reward for reward type error")
         return ditch_rew+waypt_rew
     
     def _straight_potential(self, xy_position):
