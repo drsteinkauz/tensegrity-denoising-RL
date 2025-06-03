@@ -32,7 +32,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_cap_velocity=True,
         use_stability_detection=False,
         use_obs_noise=False,
-        use_intrinsic_params_dr=True,
+        use_intrinsic_params_dr=False,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -72,10 +72,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         iniyaw_bias_w = -np.pi/15,
         way_pts_range_w = (1.0, 1.0),
         way_pts_angle_range_w = (0.0, 0.0),
-        iniyaw_bias_j = np.pi/10,
+        iniyaw_bias_j = 0.0, # np.pi/10,
         way_pts_range_j = (3.0, 3.0),
-        way_pts_angle_range_j = (-np.pi/12, np.pi/12),
-        ditch_reward_max=200,
+        way_pts_angle_range_j = (-np.pi/6, np.pi/6),
+        ditch_reward_max=150,
         ditch_reward_stdev_w=0.05,
         ditch_reward_stdev_j=0.15,
         waypt_reward_amplitude=50,
@@ -702,10 +702,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         tracking_vec = self._waypt - xy_position
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
-        # dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
+        dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
 
-        # ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
-        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+        waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
 
         # if self._robot_type == "w":
         #     center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
@@ -713,8 +713,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         #     ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
         #     waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
 
-        ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
-        waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        # ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
         return ditch_rew+waypt_rew
     
     def _straight_potential(self, xy_position):
@@ -729,7 +729,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         distance_along = distance * np.cos(yaw_diff)
         distance_bias = np.abs(distance * np.sin(yaw_diff))
 
-        potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
+        # potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
+        potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
         return potential
     
     def _vel_track_rew(self, vel_cmd, vel_bwd):
