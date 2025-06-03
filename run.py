@@ -25,7 +25,7 @@ def save_args_to_json(args, filename=None):
     with open(filepath, 'w') as f:
         json.dump(vars(args), f, indent=4)
     
-    print(f"配置已保存到: {filepath}")
+    print(f"configs are saved to: {filepath}")
     return timestamp
 
 def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",starting_point=None):
@@ -146,7 +146,33 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",st
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+    
+    # Initialize the graph structure
+    node_obs_dim = 6 # cap position*3, cap velocity*3
+    if env._desired_action == "tracking":
+        global_obs_dim = 2
+    else:
+        global_obs_dim = 0
+    node_dim = node_obs_dim + global_obs_dim
+    edge_dim = 2 # edge type, distance
+    hidden_dim = 128
+
+    node_num = 6 # 6 caps
+    edge_type = torch.zeros((24, 1), dtype=torch.float32).to(device)
+    edge_type[0:12, 0] = 1 # edge type: active tendon * 6
+    edge_type[12:18, 0] = 2 # edge type: passive tendon * 3
+    edge_type[18:24, 0] = 0 # edge type: bar * 3
+    edge_type_mask = (edge_type[:, 0] == 1)  # mask for active edges
+
+    if env._robot_type == "j":
+        edge_index = torch.tensor([[4, 0, 0, 2, 2, 4, 5, 1, 1, 3, 3, 5, 1, 4, 0, 3, 2, 5, 0, 1, 2, 3, 4, 5],
+                                        [0, 4, 2, 0, 4, 2, 1, 5, 3, 1, 5, 3, 4, 1, 3, 0, 5, 2, 1, 0, 3, 2, 5, 4]], dtype=torch.long).to(device)
+    elif env._robot_type == "w":
+        raise NotImplementedError("Graph type 'w' is not implemented yet.")
+    else:
+        raise ValueError("Unsupported graph type. Use 'j' for jonathan's configration or 'w' for will's configration.")
+
+    actor = gnn_sac.GNNPolicyNetwork(state_dim=env.state_shape, observation_dim=env.observation_space.shape[0], action_dim=env.action_space.shape[0], global_obs_dim=global_obs_dim, graph_type=env._robot_type, device=device).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -168,8 +194,10 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     y_pos_list = []
     iter = int(simulation_seconds/dt)
     for i in range(iter):
+        # Convert observation to graph input
+        obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim, edge_dim, edge_index, edge_type)
         # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
-        action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+        action_scaled, _ = actor.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled.detach() * 0.05
@@ -218,7 +246,33 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    actor = gnn_sac.PolicyNetwork(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
+
+    # Initialize the graph structure
+    node_obs_dim = 6 # cap position*3, cap velocity*3
+    if env._desired_action == "tracking":
+        global_obs_dim = 2
+    else:
+        global_obs_dim = 0
+    node_dim = node_obs_dim + global_obs_dim
+    edge_dim = 2 # edge type, distance
+    hidden_dim = 128
+
+    node_num = 6 # 6 caps
+    edge_type = torch.zeros((24, 1), dtype=torch.float32).to(device)
+    edge_type[0:12, 0] = 1 # edge type: active tendon * 6
+    edge_type[12:18, 0] = 2 # edge type: passive tendon * 3
+    edge_type[18:24, 0] = 0 # edge type: bar * 3
+    edge_type_mask = (edge_type[:, 0] == 1)  # mask for active edges
+
+    if env._robot_type == "j":
+        edge_index = torch.tensor([[4, 0, 0, 2, 2, 4, 5, 1, 1, 3, 3, 5, 1, 4, 0, 3, 2, 5, 0, 1, 2, 3, 4, 5],
+                                        [0, 4, 2, 0, 4, 2, 1, 5, 3, 1, 5, 3, 4, 1, 3, 0, 5, 2, 1, 0, 3, 2, 5, 4]], dtype=torch.long).to(device)
+    elif env._robot_type == "w":
+        raise NotImplementedError("Graph type 'w' is not implemented yet.")
+    else:
+        raise ValueError("Unsupported graph type. Use 'j' for jonathan's configration or 'w' for will's configration.")
+
+    actor = gnn_sac.GNNPolicyNetwork(state_dim=env.state_shape, observation_dim=env.observation_space.shape[0], action_dim=env.action_space.shape[0], global_obs_dim=global_obs_dim, graph_type=env._robot_type, device=device).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -238,8 +292,10 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
         dt = env.dt
         iter = int(simulation_seconds/dt)
         for j in range(iter):
+            # Convert observation to graph input
+            obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim, edge_dim, edge_index, edge_type)
             # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
-            action_scaled, _ = actor.forward(torch.from_numpy(obs).float())
+            action_scaled, _ = actor.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
             action_scaled = torch.tanh(action_scaled)
             _, obs, _, _, done, _, info = env.step(action_scaled.detach().numpy())
 
@@ -267,6 +323,21 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
     np.save(os.path.join(saved_data_dir, "group_xy_pos_data.npy"),xy_pos_array)
     if env._desired_action == "tracking":
         np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
+
+def _obs_to_graph_input(observation, device, node_num, node_dim, edge_dim, edge_index, edge_type):
+        # observation: [batch, obs_dim]
+        nodes = torch.zeros(observation.shape[0], node_num, node_dim, dtype=torch.float32, device=observation.device)
+        nodes[:, :, 0:3] = observation[:, :18].view(-1, 6, 3) # cap position
+        nodes[:, :, 3:6] = observation[:, 18:36].view(-1, 6, 3) # cap velocity
+        nodes[:, :, 6:] = observation[:, 36:].unsqueeze(1).expand(-1, node_num, -1)  # global observation
+
+        edge_attr = torch.zeros((observation.shape[0], edge_index.shape[1], edge_dim), dtype=torch.float32, device=observation.device)
+        edge_type_expanded = edge_type.expand(observation.shape[0], -1, -1)
+        edge_attr[:, :, 0] = edge_type_expanded[:, :, 0]
+        edge_attr[:, :, 1] = torch.norm(nodes[:, edge_index[0], :3] - nodes[:, edge_index[1], :3], dim=-1)
+
+        return nodes, edge_attr
+
 
 # Training loop
 if __name__ == "__main__":
