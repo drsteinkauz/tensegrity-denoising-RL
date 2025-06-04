@@ -57,9 +57,13 @@ class GNNEncoder(nn.Module):
         msg = self.mlp_msg(msg_input)  # [batch, edge_num, hidden_dim]
 
         # aggregation (sum over incoming messages per node)
-        agg_msg = torch.zeros(B, N, msg.shape[-1], device=node_attr.device)
-        for i in range(B):
-            agg_msg[i].index_add_(0, idx_received, msg[i])
+        agg_msg = torch.zeros(B, N, msg.shape[-1], 
+                             device=node_attr.device, 
+                             dtype=msg.dtype)  
+        
+        # vectorized contennation
+        idx_expanded = idx_received.unsqueeze(0).unsqueeze(-1).expand(B, -1, msg.size(-1))
+        agg_msg.scatter_add_(1, idx_expanded, msg)
 
         update_input = torch.cat([node_attr, agg_msg], dim=-1)  # [batch, node_num, node_dim+out_dim]
         out = self.mlp_update(update_input)  # [batch, node_num, out_dim]
@@ -92,11 +96,8 @@ class ActorHead(nn.Module):
         actor_input = torch.cat([h_received_a, h_sent_a, edge_attr_a], dim=-1) # [batch, active_edge_num, 2*hidden_dim + edge_dim]
         actor_output = self.edge_mlp(actor_input)  # [batch, active_edge_num, 2]
 
-        even_idx = torch.arange(0, actor_output.shape[1], 2, device=actor_output.device)
-        odd_idx = torch.arange(1, actor_output.shape[1], 2, device=actor_output.device)
-        actor_output_even = actor_output[:, even_idx, :]  # [batch, active_edge_num//2, 2]
-        actor_output_odd = actor_output[:, odd_idx, :]    # [batch, active_edge_num//2, 2]
-        actor_output_avg = (actor_output_even + actor_output_odd) / 2  # [batch, active_edge_num//2 = action_dim, 2]
+        actor_output_avg = actor_output.view(actor_output.size(0), -1, 2, actor_output.size(2))
+        actor_output_avg = actor_output_avg.mean(dim=2)
         return actor_output_avg
 
 class QNetwork(nn.Module):
@@ -186,11 +187,18 @@ class ReplayBuffer:
         self.ptr = (self.ptr + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
     
-    def sample(self, batch_size):
         # batch = random.sample(self.buffer, batch_size)
-        indices = torch.randint(0, self.size, (batch_size,), device=self.device)
-        batch = (self.observations[indices], self.actions[indices], self.rewards[indices], self.next_observations[indices], self.dones[indices])
-        return batch
+
+    def sample(self, batch_size):
+        # torch.randperm replaces torch.randint
+        indices = torch.randperm(self.size, device=self.device)[:batch_size]
+        return (
+            self.observations[indices],
+            self.actions[indices],
+            self.rewards[indices],
+            self.next_observations[indices],
+            self.dones[indices]
+        )
 
 
 # SAC Agent class
@@ -203,7 +211,7 @@ class SACAgent:
         self.gamma = 0.99       # Discount factor
         self.tau = 0.005        # Soft target update factor
         self.lr = 3e-4          # Learning rate
-        self.batch_size = 256    # Batch size
+        self.batch_size = 128    # Batch size
         self.buffer_size = 1000000 # Replay buffer size
         self.updates_per_step = 1
         self.warmup_steps = 256
@@ -249,6 +257,13 @@ class SACAgent:
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
+        self.scaler = torch.amp.GradScaler( )
+        self.precomputed_indices = {
+            "active_edge_mask": (self.edge_type[:, 0] == 1),
+            "edge_index": self.edge_index,
+            "idx_received": self.edge_index[0],
+            "idx_sent": self.edge_index[1]
+        }
     
     def select_action(self, observation):
         observation = torch.FloatTensor(observation).to(self.device).unsqueeze(0)
@@ -328,14 +343,82 @@ class SACAgent:
         return info
 
     def _obs_to_graph_input(self, observation):
-        # observation: [batch, obs_dim]
-        nodes = torch.zeros(observation.shape[0], self.node_num, self.node_dim, dtype=torch.float32, device=observation.device)
-        nodes[:, :, 0:3] = observation[:, :18].view(-1, 6, 3) # cap position
-        nodes[:, :, 3:6] = observation[:, 18:36].view(-1, 6, 3) # cap velocity
-        nodes[:, :, 6:] = observation[:, 36:].unsqueeze(1).expand(-1, self.node_num, -1)  # global observation
-
-        edge_attr = torch.zeros((observation.shape[0], self.edge_index.shape[1], self.edge_dim), dtype=torch.float32, device=observation.device)
-        edge_type_expanded = self.edge_type.expand(observation.shape[0], -1, -1)
-        edge_attr[:, :, 0] = edge_type_expanded[:, :, 0]
-        edge_attr[:, :, 1] = torch.norm(nodes[:, self.edge_index[0], :3] - nodes[:, self.edge_index[1], :3], dim=-1)
+        B = observation.size(0)
+        nodes = torch.empty(B, self.node_num, self.node_dim, 
+                            device=observation.device)
+        
+        cap_pos = observation[:, :18].view(B, 6, 3)
+        cap_vel = observation[:, 18:36].view(B, 6, 3)
+        global_obs = observation[:, 36:].view(B, 1, -1).expand(-1, self.node_num, -1)
+        
+        nodes[:, :, :3] = cap_pos
+        nodes[:, :, 3:6] = cap_vel
+        nodes[:, :, 6:] = global_obs
+        
+        idx_received = self.precomputed_indices["idx_received"]
+        idx_sent = self.precomputed_indices["idx_sent"]
+        
+        src_nodes = nodes[:, idx_received, :3]
+        dst_nodes = nodes[:, idx_sent, :3]
+        
+        distances = torch.norm(src_nodes - dst_nodes, dim=-1, keepdim=True)
+        
+        edge_attr = torch.empty(B, self.edge_index.size(1), self.edge_dim, 
+                            device=observation.device)
+        
+        edge_attr[..., 0] = self.edge_type[:, 0].view(1, -1)
+        edge_attr[..., 1] = distances.squeeze(-1)  
+        
         return nodes, edge_attr
+    
+    def save(self, path):
+        
+        state = {
+            'gnn_actor_state_dict': self.gnn_actor.state_dict(),
+            'critic_state_dict': self.critic.state_dict(),
+            'target_critic_state_dict': self.target_critic.state_dict(),
+            'ent_coef_optimizer_state_dict': self.ent_coef_optimizer.state_dict(),
+            'gnn_actor_optimizer_state_dict': self.gnn_actor_optimizer.state_dict(),
+            'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
+            'log_ent_coef': self.log_ent_coef,
+            'scaler_state_dict': self.scaler.state_dict(),
+            'replay_buffer': self.replay_buffer.get_state() if hasattr(self.replay_buffer, 'get_state') else None,
+            'edge_index': self.edge_index,
+            'edge_type': self.edge_type,
+            'edge_type_mask': self.edge_type_mask,
+            'precomputed_indices': self.precomputed_indices
+        }
+        
+        torch.save(state, path)
+        print(f"Agent saved to {path}")
+    
+    def load(self, path, load_replay_buffer=False):
+        
+        state = torch.load(path, map_location=self.device)
+        
+        self.gnn_actor.load_state_dict(state['gnn_actor_state_dict'])
+        self.critic.load_state_dict(state['critic_state_dict'])
+        self.target_critic.load_state_dict(state['target_critic_state_dict'])
+        
+        self.ent_coef_optimizer.load_state_dict(state['ent_coef_optimizer_state_dict'])
+        self.gnn_actor_optimizer.load_state_dict(state['gnn_actor_optimizer_state_dict'])
+        self.critic_optimizer.load_state_dict(state['critic_optimizer_state_dict'])
+        
+        self.log_ent_coef = state['log_ent_coef'].to(self.device)
+        self.scaler.load_state_dict(state['scaler_state_dict'])
+        
+        self.edge_index = state['edge_index'].to(self.device)
+        self.edge_type = state['edge_type'].to(self.device)
+        self.edge_type_mask = state['edge_type_mask'].to(self.device)
+        self.precomputed_indices = state['precomputed_indices']
+        
+        for key in self.precomputed_indices:
+            if torch.is_tensor(self.precomputed_indices[key]):
+                self.precomputed_indices[key] = self.precomputed_indices[key].to(self.device)
+        
+        if load_replay_buffer and state['replay_buffer'] is not None:
+            self.replay_buffer.set_state(state['replay_buffer'])
+            print("Replay buffer loaded successfully")
+        
+        print(f"Agent loaded from {path}")
+        return self
