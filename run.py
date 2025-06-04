@@ -381,6 +381,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
     parser.add_argument("--reward_type",default="Cone", type = str,choices=["Cone", "Hybrid","Banana","Ditch"])
+    parser.add_argument("--save_actor_only",default=True, type=bool)
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -408,9 +409,9 @@ if __name__ == "__main__":
                                     terminate_when_unhealthy = terminate_when_unhealthy,
                                     reward_type = args.reward_type)
         if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point,save_actor_only=args.save_actor_only)
         else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx,save_actor_only=args.save_actor_only)
 
     if(args.test):
         if os.path.isfile(args.test):
