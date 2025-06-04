@@ -208,7 +208,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
 
 
-        actions_list.append(action_scaled.detach().numpy())
+        actions_list.append(action_scaled.detach().numpy().squeeze())
         #the tendon lengths are the last 9 observations
         # tendon_length_list.append(obs[-9:])
         tendon_length_list.append(info["tendon_length"])
