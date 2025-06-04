@@ -28,7 +28,7 @@ def save_args_to_json(args, filename=None):
     print(f"configs are saved to: {filepath}")
     return timestamp
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",starting_point=None):
+def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False", starting_point=None, save_actor_only=True):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -108,7 +108,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False",st
                     ent_coefs.append(info_agent["ent_coef"])
 
             if step_num % TIMESTEPS == 0:
-                agent.save(os.path.join(model_dir, f"actor_{step_num}.pth"))
+                if save_actor_only:
+                    torch.save(agent.gnn_actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+                else:
+                    agent.save(os.path.join(model_dir, f"actor_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
@@ -172,7 +175,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     else:
         raise ValueError("Unsupported graph type. Use 'j' for jonathan's configration or 'w' for will's configration.")
 
-    actor = gnn_sac.GNNPolicyNetwork(state_dim=env.state_shape, observation_dim=env.observation_space.shape[0], action_dim=env.action_space.shape[0], global_obs_dim=global_obs_dim, graph_type=env._robot_type, device=device).to(device)
+    actor = gnn_sac.GNNPolicyNetwork(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -272,7 +275,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
     else:
         raise ValueError("Unsupported graph type. Use 'j' for jonathan's configration or 'w' for will's configration.")
 
-    actor = gnn_sac.GNNPolicyNetwork(state_dim=env.state_shape, observation_dim=env.observation_space.shape[0], action_dim=env.action_space.shape[0], global_obs_dim=global_obs_dim, graph_type=env._robot_type, device=device).to(device)
+    actor = gnn_sac.GNNPolicyNetwork(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
     state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
