@@ -81,7 +81,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False", s
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(observation)
-            _, next_observation, _, reward, done, _, info_env = env.step(action_scaled)
+            _, next_observation, _, reward, done, _, info_env = env.step(action_scaled,step_num)
             agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
             info_agent = agent.update()
             

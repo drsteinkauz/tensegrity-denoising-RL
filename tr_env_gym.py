@@ -325,7 +325,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         terminated = not self.is_healthy if self._terminate_when_unhealthy else False
         return terminated
 
-    def step(self, action_scaled):
+    def step(self, action_scaled,step):
         # action: [-1, 1] -> [tendon_min_length, tendon_max_length]
         action = action_scaled * (self._tendon_max_length - self._tendon_min_length) / 2 + (self._tendon_max_length + self._tendon_min_length) / 2
         
@@ -443,8 +443,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         
         elif self._desired_action == "tracking":
             # ditch tracking reward
-            ditch_rew_after = self._ditch_reward(xy_position_after)
-            ditch_rew_before = self._ditch_reward(xy_position_before)
+            ditch_rew_after = self._ditch_reward(xy_position_after,step=step)
+            ditch_rew_before = self._ditch_reward(xy_position_before,step=step)
             forward_reward = ditch_rew_after - ditch_rew_before
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
@@ -703,7 +703,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         tracking_vec = self._waypt - xy_position
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
-        if self.reward_type == "Cone":
+        if self.reward_type == "Ditch":
             dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
             ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
             waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
@@ -715,19 +715,22 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                 waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
             else:
                 raise TypeError("banana reward for Jonathan is not defined")
-        elif self.reward_type == "Ditch":
+        elif self.reward_type == "Cone":
             ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
             waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
         elif self.reward_type == "Hybrid":
             Tempreture = 5e6
+            warmup=1e6
             dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
-            ditch_rew1 = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
-            ditch_rew2 = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
-            if step<Tempreture:
-                fct = step/Tempreture
-                ditch_rew = ditch_rew1*(1-fct)+ditch_rew2*fct
+            ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+            cone_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+            if step <warmup:
+                ditch_rew = cone_rew
+            elif step<Tempreture+warmup:
+                fct = (step-warmup)/Tempreture
+                ditch_rew = ditch_rew*fct+cone_rew*(1-fct)
             else:
-                ditch_rew = ditch_rew2
+                ditch_rew = ditch_rew
             waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
         else:
             raise TypeError("This error serves as a reward for reward type error")
