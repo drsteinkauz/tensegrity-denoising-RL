@@ -704,18 +704,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         dist_along = np.dot(tracking_vec, pointing_vec_norm)
         dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
 
-        ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
-        waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        # if self._robot_type == "w":
-        #     center_bias = (dist_along/dist_pointing - 1.0) * dist_along/dist_pointing * np.tan(self._iniyaw_bias)
-
-        #     ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-(dist_bias-center_bias)**2 / (2*self._ditch_reward_stdev**2))
-        #     waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-
-        # ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
-        # waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-        return ditch_rew+waypt_rew
+        ditch_potential = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
+        waypt_potential = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
+        cone_potential = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
+        ratio = 4.0
+        ellipse_potential = -self._forrew_rate * (dist_along**2 + (ratio*dist_bias)**2)**0.5 / self.dt
+        return (ditch_potential + waypt_potential) / 2.0
     
     def _straight_potential(self, xy_position):
         k_ALONG = self._forrew_rate / self.dt
