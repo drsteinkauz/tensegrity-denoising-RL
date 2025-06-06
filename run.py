@@ -352,7 +352,7 @@ if __name__ == "__main__":
     parser.add_argument('--test', metavar='path_to_model')
     parser.add_argument('--group_test', metavar='path_to_model')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
-    parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
+    parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j","ju", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
     parser.add_argument('--sb3_algo', default="SAC", type=str, choices=["SAC", "TD3", "A2C", "PPO"],
                         help='StableBaseline3 RL algorithm: SAC, TD3, A2C, PPO')
@@ -381,9 +381,9 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
     parser.add_argument("--reward_type",default="Cone", type = str,choices=["Cone", "Hybrid","Banana","Ditch"])
-    parser.add_argument("--save_actor_only",default=True, type=bool)
+    parser.add_argument("--save_actor_only", default="True", choices=["True", "False"])
     args = parser.parse_args()
-
+    args.save_actor_only = (args.save_actor_only == "True")
     if args.terminate_when_unhealthy == "no":
         terminate_when_unhealthy = False
     else:
@@ -394,6 +394,9 @@ if __name__ == "__main__":
         robot_type = "w"
     elif args.env_xml == "j":
         args.env_xml = "3prism_jonathan_steady_side.xml"
+        robot_type = "j"
+    elif args.env_xml == "ju":
+        args.env_xml = "3prism_jonathan_steady_side_uneven_ground.xml"
         robot_type = "j"
 
     timestamp = save_args_to_json(args)
