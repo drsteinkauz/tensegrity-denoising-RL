@@ -718,9 +718,17 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif self.reward_type == "Cone":
             ditch_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
             waypt_rew = self._waypt_reward_amplitude * np.exp(-np.linalg.norm(xy_position - self._waypt)**2 / (2*self._waypt_reward_stdev**2))
-        elif self.reward_type == "Hybrid":
-            Tempreture = 5e6
-            warmup=1e6
+        elif self.reward_type == "Hybrid" or self.reward_type=="HybridSlow" or self.reward_type=="Hybrid2Slow":
+            if self.reward_type=="Hybrid":
+                Tempreture = 5e6
+                warmup=1e6
+            elif self.reward_type=="HybridSlow":
+                Tempreture = 1e7
+                warmup = 1e6 
+            else:
+                Tempreture = 1e7
+                warmup = 1e6 
+                step+=5500000# This needs to be coded by hand
             dist_bias = np.linalg.norm(tracking_vec - dist_along*pointing_vec_norm) * np.sign(np.linalg.det(np.array([tracking_vec, pointing_vec_norm])))
             ditch_rew = self._ditch_reward_max * (1.0 - np.abs(dist_along)/dist_pointing) * np.exp(-dist_bias**2 / (2*self._ditch_reward_stdev**2))
             cone_rew = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt

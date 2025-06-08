@@ -199,6 +199,28 @@ class ReplayBuffer:
             self.next_observations[indices],
             self.dones[indices]
         )
+    
+    def get_state(self):
+        return {
+        'observations': self.observations.cpu(),
+        'actions': self.actions.cpu(),
+        'rewards': self.rewards.cpu(),
+        'next_observations': self.next_observations.cpu(),
+        'dones': self.dones.cpu(),
+        'ptr': self.ptr,
+        'size': self.size
+    }
+
+    def set_state(self, state):
+        size = state['size']
+        self.ptr = state['ptr']
+        self.size = size
+
+        self.observations[:size] = state['observations'].to(self.device)
+        self.actions[:size] = state['actions'].to(self.device)
+        self.rewards[:size] = state['rewards'].to(self.device)
+        self.next_observations[:size] = state['next_observations'].to(self.device)
+        self.dones[:size] = state['dones'].to(self.device)
 
 
 # SAC Agent class
@@ -382,7 +404,7 @@ class SACAgent:
             'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
             'log_ent_coef': self.log_ent_coef,
             'scaler_state_dict': self.scaler.state_dict(),
-            'replay_buffer': self.replay_buffer.get_state() if hasattr(self.replay_buffer, 'get_state') else None,
+            'replay_buffer': self.replay_buffer.get_state(),
             'edge_index': self.edge_index,
             'edge_type': self.edge_type,
             'edge_type_mask': self.edge_type_mask,
@@ -392,7 +414,7 @@ class SACAgent:
         torch.save(state, path)
         print(f"Agent saved to {path}")
     
-    def load(self, path, load_replay_buffer=False):
+    def load(self, path, load_replay_buffer=True):
         
         state = torch.load(path, map_location=self.device)
         
@@ -400,11 +422,8 @@ class SACAgent:
         self.critic.load_state_dict(state['critic_state_dict'])
         self.target_critic.load_state_dict(state['target_critic_state_dict'])
         
-        self.ent_coef_optimizer.load_state_dict(state['ent_coef_optimizer_state_dict'])
-        self.gnn_actor_optimizer.load_state_dict(state['gnn_actor_optimizer_state_dict'])
-        self.critic_optimizer.load_state_dict(state['critic_optimizer_state_dict'])
-        
         self.log_ent_coef = state['log_ent_coef'].to(self.device)
+        self.log_ent_coef.requires_grad_(True)
         self.scaler.load_state_dict(state['scaler_state_dict'])
         
         self.edge_index = state['edge_index'].to(self.device)
@@ -419,6 +438,8 @@ class SACAgent:
         if load_replay_buffer and state['replay_buffer'] is not None:
             self.replay_buffer.set_state(state['replay_buffer'])
             print("Replay buffer loaded successfully")
+        else:
+            print("No replay buffer loaded")
         
         print(f"Agent loaded from {path}")
         return self
