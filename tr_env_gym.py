@@ -402,6 +402,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                 forward_reward = delta_psi * self._desired_direction 
                 costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
+                cone_potential_before = self._cone_potential(xy_position_before)
+                cone_potential_after = self._cone_potential(xy_position_after)
+                costs -= cone_potential_after - cone_potential_before
+
             else:
                 forward_reward = 0
                 costs = ctrl_cost =  0
@@ -442,8 +446,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         
         elif self._desired_action == "tracking":
             # ditch tracking reward
-            ditch_rew_after = self._ditch_reward(xy_position_after)
-            ditch_rew_before = self._ditch_reward(xy_position_before)
+            ditch_rew_after = self._tracking_potential(xy_position_after)
+            ditch_rew_before = self._tracking_potential(xy_position_before)
             forward_reward = ditch_rew_after - ditch_rew_before
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
@@ -695,7 +699,12 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         else:
             return theta
     
-    def _ditch_reward(self, xy_position):
+    def _cone_potential_norm(self, xy_position):
+        moving_vec = xy_position - self._oripoint
+        cone_potential = -self._forrew_rate * np.linalg.norm(moving_vec) / self.dt
+        return cone_potential
+    
+    def _tracking_potential(self, xy_position):
         pointing_vec = self._waypt - self._oripoint
         dist_pointing = np.linalg.norm(pointing_vec)
         pointing_vec_norm = pointing_vec / dist_pointing
