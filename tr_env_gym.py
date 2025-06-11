@@ -718,7 +718,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         cone_potential = -self._forrew_rate * np.linalg.norm(tracking_vec) / self.dt
         ratio = 4.0
         ellipse_potential = -self._forrew_rate * (dist_along**2 + (ratio*dist_bias)**2)**0.5 / self.dt
-        return (ditch_potential + waypt_potential) / 2.0
+        return (ditch_potential + waypt_potential) / 2.0 * (200.0 / 150.0)
     
     def _straight_potential(self, xy_position):
         k_ALONG = self._forrew_rate / self.dt
