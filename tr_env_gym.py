@@ -451,8 +451,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             terminated = self.terminated
 
         elif self._desired_action == "arc":
-            before_potential = self._arc_reward(xy_position_before, xy_position_after, self._curvature)
-            forward_reward = after_potential - before_potential
+            forward_reward = self._arc_reward(xy_position_before, xy_position_after, self._curvature)
 
             costs = ctrl_cost = self.control_cost(action, tendon_length_6)
             healthy_reward = 0
