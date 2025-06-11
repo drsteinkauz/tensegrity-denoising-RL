@@ -402,8 +402,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                 forward_reward = delta_psi * self._desired_direction 
                 costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
-                cone_potential_before = self._cone_potential(xy_position_before)
-                cone_potential_after = self._cone_potential(xy_position_after)
+                cone_potential_before = self._cone_potential_norm(xy_position_before)
+                cone_potential_after = self._cone_potential_norm(xy_position_after)
                 costs -= cone_potential_after - cone_potential_before
 
             else:
