@@ -72,9 +72,11 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         iniyaw_bias_w = -np.pi/15,
         way_pts_range_w = (1.0, 1.0),
         way_pts_angle_range_w = (0.0, 0.0),
+        curvature_w = -0.2,
         iniyaw_bias_j = 0.0, # np.pi/10,
         way_pts_range_j = (3.0, 3.0),
         way_pts_angle_range_j = (-np.pi/6, np.pi/6),
+        curvature_j = 0.2,
         ditch_reward_max=150,
         ditch_reward_stdev_w=0.05,
         ditch_reward_stdev_j=0.15,
@@ -194,6 +196,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._ditch_reward_stdev = ditch_reward_stdev_w
             self._waypt_reward_stdev = waypt_reward_stdev_w
 
+            self._curvature = curvature_w
+
             self._forrew_rate = forrew_rate_w
 
         elif self._robot_type == "j":
@@ -217,6 +221,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._waypt_angle_range = way_pts_angle_range_j
             self._ditch_reward_stdev = ditch_reward_stdev_j
             self._waypt_reward_stdev = waypt_reward_stdev_j
+
+            self._curvature = curvature_j
 
             self._forrew_rate = forrew_rate_j
 
@@ -311,7 +317,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             min_velocity = 0.1
             is_healthy = np.isfinite(state).all() and (np.any(bar_speeds > min_velocity) )    
 
-        else: #self._desired_action == "straight" or self._desired_action == "tracking" or self._desired_action == "vel_track":
+        else: #self._desired_action == "straight" or self._desired_action == "arc" or self._desired_action == "tracking" or self._desired_action == "vel_track":
             min_velocity = 0.0001
             is_healthy = np.isfinite(state).all() and ((self._x_velocity > min_velocity or self._x_velocity < -min_velocity) \
                                                         or (self._y_velocity > min_velocity or self._y_velocity < -min_velocity) )
@@ -442,6 +448,14 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             else:
                 healthy_reward = 0
             
+            terminated = self.terminated
+
+        elif self._desired_action == "arc":
+            before_potential = self._arc_reward(xy_position_before, xy_position_after, self._curvature)
+            forward_reward = after_potential - before_potential
+
+            costs = ctrl_cost = self.control_cost(action, tendon_length_6)
+            healthy_reward = 0
             terminated = self.terminated
         
         elif self._desired_action == "tracking":
@@ -700,8 +714,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             return theta
     
     def _cone_potential_norm(self, xy_position):
-        moving_vec = xy_position - self._oripoint
-        cone_potential = -self._forrew_rate * np.linalg.norm(moving_vec) / self.dt
+        odom_vec = xy_position - self._oripoint
+        cone_potential = -self._forrew_rate * np.linalg.norm(odom_vec) / self.dt
         return cone_potential
     
     def _tracking_potential(self, xy_position):
@@ -735,6 +749,32 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         # potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
         potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
         return potential
+
+    def _arc_reward(self, xy_position_before, xy_position_after, curvature):
+        k_ALONG = self._forrew_rate / self.dt
+        stdev_BIAS = self._ditch_reward_stdev
+
+        radius = 1.0 / curvature if curvature != 0 else 1e6  # avoid division by zero
+        rotation_center = self._oripoint + np.array([-radius * np.sin(self._reset_psi), radius * np.cos(self._reset_psi)])
+
+        vec_center2before = xy_position_before - rotation_center
+        vec_center2after = xy_position_after - rotation_center
+        vec_movement = vec_center2after - vec_center2before
+
+        vec_norm = (vec_center2after + vec_center2before) / 2.0
+        vec_tangent = np.array([-vec_norm[1], vec_norm[0]])
+        vec_tangent /= np.linalg.norm(vec_tangent)
+        
+        distance_along = np.dot(vec_movement, vec_tangent)
+        along_reward = self._desired_direction * k_ALONG * distance_along
+
+        distance_bias_before = np.linalg.norm(vec_center2before) - np.abs(radius)
+        bias_potential_before = k_ALONG * np.exp(-distance_bias_before**2 / (2*stdev_BIAS**2))
+        distance_bias_after = np.linalg.norm(vec_center2after) - np.abs(radius)
+        bias_potential_after = k_ALONG * np.exp(-distance_bias_after**2 / (2*stdev_BIAS**2))
+        bias_reward = bias_potential_after - bias_potential_before
+
+        return along_reward + bias_reward
     
     def _vel_track_rew(self, vel_cmd, vel_bwd):
         track_stdev = np.array([5.0, 7.0])
