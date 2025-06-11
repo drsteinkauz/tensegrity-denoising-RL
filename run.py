@@ -7,8 +7,10 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
 import time
+import json
+from datetime import datetime
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
+def train(env, log_dir, model_dir, lr, save_actor_only, gpu_idx=None, tb_step_recorder="False", starting_point=None):
     if gpu_idx is not None:
         device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
     else:
@@ -24,6 +26,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
 
     agent.lr = lr
     
+    if starting_point is not None:
+        agent.load(starting_point,load_replay_buffer=True)
+
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
@@ -85,7 +90,10 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
                     ent_coefs.append(info_agent["ent_coef"])
 
             if step_num % TIMESTEPS == 0:
-                torch.save(agent.gnn_actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+                if save_actor_only:
+                    torch.save(agent.gnn_actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
+                else:
+                    agent.save(os.path.join(model_dir, f"agent_{step_num}.pth"))
 
             if done or episode_len >= 5000:
                 break
@@ -120,9 +128,9 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
     
     writer.close()
 
-def test(env, path_to_model, saved_data_dir, simulation_seconds):
+def test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+    
     # Initialize the graph structure
     node_obs_dim = 6 # cap position*3, cap velocity*3
     if env._desired_action == "tracking":
@@ -150,6 +158,8 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
 
     actor = gnn_sac.GNNPolicyNetwork(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    if not read_actor_only:
+        state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
@@ -219,9 +229,9 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds):
     if env._desired_action == "tracking":
         np.save(os.path.join(saved_data_dir, "waypt_data.npy"),waypt_array)
 
-def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num):
+def group_test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only, group_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     # Initialize the graph structure
     node_obs_dim = 6 # cap position*3, cap velocity*3
     if env._desired_action == "tracking":
@@ -249,6 +259,8 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, group_num
 
     actor = gnn_sac.GNNPolicyNetwork(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
     state_dict = torch.load(path_to_model, map_location=torch.device(device=device))
+    if not read_actor_only:
+        state_dict = state_dict['gnn_actor_state_dict']
     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
@@ -312,6 +324,23 @@ def _obs_to_graph_input(observation, device, node_num, node_dim, edge_dim, edge_
 
         return nodes, edge_attr
 
+def save_args_to_json(args, filename=None):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder_name = f"results_{timestamp}"
+    
+    os.makedirs(folder_name, exist_ok=True)
+    
+    if filename is None:
+        filename = f"config.json"
+    
+    filepath = os.path.join(folder_name, filename)
+    
+    with open(filepath, 'w') as f:
+        json.dump(vars(args), f, indent=4)
+    
+    print(f"configs are saved to: {filepath}")
+    return timestamp
+
 # Training loop
 if __name__ == "__main__":
     # Define the environment here (for example, OpenAI Gym)
@@ -339,10 +368,10 @@ if __name__ == "__main__":
     parser.add_argument('--contact_with_self_penatly', default= 0.0, type=float,
                         help="The penalty multiplied by the total contact between bars, which is then subtracted from the reward.\
                         By default this is 0.0, meaning there is no penalty for contact.")
-    parser.add_argument('--log_dir', default="logs", type=str,
-                        help="The directory where the training logs will be saved")
-    parser.add_argument('--model_dir', default="models", type=str,
-                        help="The directory where the trained models will be saved")
+    # parser.add_argument('--log_dir', default="logs", type=str,
+    #                     help="The directory where the training logs will be saved")
+    # parser.add_argument('--model_dir', default="models", type=str,
+    #                     help="The directory where the trained models will be saved")
     parser.add_argument('--saved_data_dir', default="saved_data", type=str)
     parser.add_argument('--simulation_seconds', default=30, type=int,
                          help="time in seconds to run simulation when testing, default is 30 seconds")
@@ -350,6 +379,7 @@ if __name__ == "__main__":
                         help="learning rate for SAC, default is 3e-4")
     parser.add_argument('--gpu_idx', default=2, type=int,
                         help="index of the GPU to use, default is 2")
+    parser.add_argument("--model_saving_type",default="full", type = str, choices=["full", "actor"])
     args = parser.parse_args()
 
     if args.terminate_when_unhealthy == "no":
@@ -363,8 +393,17 @@ if __name__ == "__main__":
     elif args.env_xml == "j":
         args.env_xml = "3prism_jonathan_steady_side.xml"
         robot_type = "j"
+    
+    if args.model_saving_type == "full":
+        save_or_read_actor_only = False
+    elif args.model_saving_type == "actor":
+        save_or_read_actor_only = True
 
     if args.train:
+        timestamp = save_args_to_json(args)
+        args.log_dir = f"results_{timestamp}/logs"
+        args.model_dir = f"results_{timestamp}/models"
+
         gymenv = tr_env_gym.tr_env_gym(render_mode="None",
                                     xml_file=os.path.join(os.getcwd(),args.env_xml),
                                     robot_type=robot_type,
@@ -373,9 +412,9 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)
         if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, save_actor_only=save_or_read_actor_only, gpu_idx=args.gpu_idx, starting_point=args.starting_point)
         else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
+            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, save_actor_only=save_or_read_actor_only, gpu_idx=args.gpu_idx)
 
     if(args.test):
         if os.path.isfile(args.test):
@@ -385,7 +424,7 @@ if __name__ == "__main__":
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds)
+            test(gymenv, path_to_model=args.test, saved_data_dir=args.saved_data_dir, simulation_seconds = args.simulation_seconds, read_actor_only=save_or_read_actor_only)
         else:
             print(f'{args.test} not found.')
 
@@ -397,6 +436,6 @@ if __name__ == "__main__":
                                         is_test = True,
                                         desired_action = args.desired_action,
                                         desired_direction = args.desired_direction)
-            group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, group_num=32)
+            group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, read_actor_only = save_or_read_actor_only, group_num=32)
         else:
             print(f'{args.group_test} not found.')
