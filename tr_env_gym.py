@@ -714,7 +714,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
     
     def _cone_potential_norm(self, xy_position):
         odom_vec = xy_position - self._oripoint
-        cone_potential = -self._forrew_rate * np.linalg.norm(odom_vec) / self.dt
+        odom_dist = np.linalg.norm(odom_vec)
+        threshold = 0.5
+        affected_dist = np.maximum(odom_dist-threshold, 0)
+        cone_potential = -self._forrew_rate * affected_dist**2 / self.dt
         return cone_potential
     
     def _tracking_potential(self, xy_position):
