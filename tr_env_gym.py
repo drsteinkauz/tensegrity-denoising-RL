@@ -44,7 +44,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         reset_noise_scale=0.0, # reset noise is handled in the following 4 variables
         min_reset_heading = 0.0,
         max_reset_heading = 2*np.pi,
-        reward_delay_seconds = 0.02, # 0.5,
+        use_reward_delay = False,
+        reward_delay_seconds = 0.5,
         contact_with_self_penalty = 0.0,
         robot_type = "w",
         tendon_reset_mean_w = 0.05,
@@ -108,6 +109,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             reset_noise_scale,
             min_reset_heading,
             max_reset_heading,
+            use_reward_delay,
             reward_delay_seconds,
             contact_with_self_penalty,
             robot_type,
@@ -277,6 +279,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         MujocoEnv.__init__(
             self, xml_file, frame_skip, observation_space=observation_space, **kwargs
         )
+        self._use_reward_delay = use_reward_delay
         self._reward_delay_steps = int(reward_delay_seconds/self.dt)
         self._heading_buffer = deque()
 
@@ -392,30 +395,44 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
 
         if self._desired_action == "turn":
-            self._heading_buffer.append(psi_after)
-            if len(self._heading_buffer) > self._reward_delay_steps:
-                old_psi = self._heading_buffer.popleft()
+            if self._use_reward_delay:
+                self._heading_buffer.append(psi_after)
+                if len(self._heading_buffer) > self._reward_delay_steps:
+                    old_psi = self._heading_buffer.popleft()
 
-                # unless the tensegrity is rotating faster than pi /(self.dt*self._reward_delay_steps) rad/s
-                # then this situation means that the tensegrity rolled from pi to -pi, and the delta should be positive
-                if psi_after < -np.pi/2 and old_psi > np.pi/2: 
+                    # unless the tensegrity is rotating faster than pi /(self.dt*self._reward_delay_steps) rad/s
+                    # then this situation means that the tensegrity rolled from pi to -pi, and the delta should be positive
+                    if psi_after < -np.pi/2 and old_psi > np.pi/2: 
+                        psi_after = 2*np.pi + psi_after
+                    # unless the tensegrity is rotating faster than pi /(self.dt*self._reward_delay_steps) rad/s
+                    # then this situation means that the tensegrity rolled from -pi to pi, and the delta should be negative
+                    elif psi_after > np.pi/2 and old_psi < -np.pi/2:
+                        psi_after = -2*np.pi + psi_after
+                    delta_psi = (psi_after - old_psi) / (self.dt*self._reward_delay_steps)
+                    forward_reward = delta_psi * self._desired_direction 
+                    costs = ctrl_cost = self.control_cost(action, tendon_length_6)
+
+                    cone_potential_before = self._cone_potential_norm(xy_position_before)
+                    cone_potential_after = self._cone_potential_norm(xy_position_after)
+                    costs -= cone_potential_after - cone_potential_before
+
+                else:
+                    forward_reward = 0
+                    costs = ctrl_cost =  0
+                    delta_psi = 0
+            
+            else:
+                if psi_after < -np.pi/2 and psi_before > np.pi/2: 
                     psi_after = 2*np.pi + psi_after
-                # unless the tensegrity is rotating faster than pi /(self.dt*self._reward_delay_steps) rad/s
-                # then this situation means that the tensegrity rolled from -pi to pi, and the delta should be negative
-                elif psi_after > np.pi/2 and old_psi < -np.pi/2:
+                elif psi_after > np.pi/2 and psi_before < -np.pi/2:
                     psi_after = -2*np.pi + psi_after
-                delta_psi = (psi_after - old_psi) / (self.dt*self._reward_delay_steps)
+                delta_psi = (psi_after - psi_before) / (self.dt*self._reward_delay_steps)
                 forward_reward = delta_psi * self._desired_direction 
                 costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
                 cone_potential_before = self._cone_potential_norm(xy_position_before)
                 cone_potential_after = self._cone_potential_norm(xy_position_after)
                 costs -= cone_potential_after - cone_potential_before
-
-            else:
-                forward_reward = 0
-                costs = ctrl_cost =  0
-                delta_psi = 0
             
             if self._terminate_when_unhealthy:
                 healthy_reward = self.healthy_reward
