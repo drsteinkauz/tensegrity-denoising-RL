@@ -768,7 +768,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         vec_tangent /= np.linalg.norm(vec_tangent)
         
         distance_along = np.dot(vec_movement, vec_tangent)
-        along_reward = self._desired_direction * k_ALONG * distance_along
+        along_reward = self._desired_direction * np.sign(curvature) * k_ALONG * distance_along
 
         distance_bias_before = np.linalg.norm(vec_center2before) - np.abs(radius)
         bias_potential_before = k_ALONG * np.exp(-distance_bias_before**2 / (2*stdev_BIAS**2))
