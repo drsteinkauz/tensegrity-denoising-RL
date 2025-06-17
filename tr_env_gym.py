@@ -426,7 +426,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                     psi_after = 2*np.pi + psi_after
                 elif psi_after > np.pi/2 and psi_before < -np.pi/2:
                     psi_after = -2*np.pi + psi_after
-                delta_psi = (psi_after - psi_before) / (self.dt*self._reward_delay_steps)
+                delta_psi = (psi_after - psi_before) / self.dt
                 forward_reward = delta_psi * self._desired_direction 
                 costs = ctrl_cost = self.control_cost(action, tendon_length_6)
 
