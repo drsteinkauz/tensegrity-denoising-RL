@@ -8,6 +8,19 @@ from collections import deque
 from collections.abc import Iterable
 from itertools import zip_longest
 from typing import List
+def set_seed(seed):
+    print(torch.backends.cudnn.deterministic,torch.backends.cudnn.benchmark )
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+def deset_seed():
+    torch.backends.cudnn.deterministic = False
 
 def weights_init_(m):
     if isinstance(m, nn.Linear):
@@ -139,6 +152,7 @@ class SACAgent:
         
         # Networks
         self.actor = PolicyNetwork(observation_dim, action_dim).to(self.device)
+        #set_seed(114514)
         self.critic = QNetwork(observation_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(observation_dim, action_dim).to(self.device)
         
@@ -146,9 +160,11 @@ class SACAgent:
         self.target_critic.load_state_dict(self.critic.state_dict())
         
         # Optimizers
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
+        #deset_seed()
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
+        
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
