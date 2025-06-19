@@ -7,114 +7,251 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 import numpy as np
 import time
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3 import A2C, PPO, TD3
+from stable_baselines3.common.callbacks import BaseCallback
+import gym
 
-def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
-    if gpu_idx is not None:
-        device = torch.device(f"cuda:{gpu_idx}" if torch.cuda.is_available() else "cpu")
+def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False", starting_point=None,algo="A2C"):
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    from stable_baselines3 import A2C
+    from stable_baselines3.common.callbacks import BaseCallback
+    
+    vec_env = DummyVecEnv([lambda: env])
+    
+    if gpu_idx is not None and torch.cuda.is_available():
+        device = torch.device(f"cuda:{gpu_idx}")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    state_dim = env.state_shape
-    observation_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
-    agent = sac.SACAgent(state_dim=state_dim, observation_dim=observation_dim, action_dim=action_dim, device=device)
-
-    agent.lr = lr
     
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(model_dir, exist_ok=True)
-
-    TIMESTEPS = 100000
-    step_num = 0
-    eps_num = 0
-
-    if tb_step_recorder == "True":
-        writer = None
-    else:
-        writer = SummaryWriter(log_dir)
-
-    while True:
-        _, observation, _, _ = env.reset()[0]
-        episode_reward = 0
-        episode_len = 0
-        episode_forward_reward = 0
-        episode_ctrl_reward = 0
-
-        if tb_step_recorder == "True":
-            writer = SummaryWriter(log_dir)
-        else:
-            actor_losses = []
-            critic_losses = []
-            ent_coef_losses = []
-            ent_coefs = []
-
-        start_time = time.time()
-
-        while True:
-            if step_num < agent.warmup_steps:
-                action_scaled = np.random.uniform(-1, 1, size=(6,))
-            else:
-                action_scaled = agent.select_action(observation)
-            _, next_observation, _, reward, done, _, info_env = env.step(action_scaled)
-            agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
-            info_agent = agent.update()
+    class TensorboardCallback(BaseCallback):
+        def __init__(self, log_dir, tb_step_recorder, algo, verbose=0):
+            super().__init__(verbose)
+            self.log_dir = log_dir
+            self.tb_step_recorder = tb_step_recorder
+            self.algo = algo
+            self.writer = None
+            self.actual_log_dir = None
+            self.max_episode_len = 5000  
             
-            observation = next_observation
-            episode_reward += reward
-            episode_forward_reward += info_env["reward_forward"]
-            episode_ctrl_reward += info_env["reward_ctrl"]
-
-            step_num += 1
-            episode_len += 1
-
-            if info_agent is not None:
-                if tb_step_recorder == "True":
-                    writer.add_scalar("loss/actor_loss", info_agent["actor_loss"], step_num)
-                    writer.add_scalar("loss/critic_loss", info_agent["critic_loss"], step_num)
-                    writer.add_scalar("loss/ent_coef_loss", info_agent["ent_coef_loss"], step_num)
-                    writer.add_scalar("loss/ent_coef", info_agent["ent_coef"], step_num)
-                    # writer.add_scalar("loss/log_pi", info_agent["log_pi"], step_num)
-                    # writer.add_scalar("loss/pi_std", info_agent["pi_std"], step_num)
-                else:
-                    actor_losses.append(info_agent["actor_loss"])
-                    critic_losses.append(info_agent["critic_loss"])
-                    ent_coef_losses.append(info_agent["ent_coef_loss"])
-                    ent_coefs.append(info_agent["ent_coef"])
-
-            if step_num % TIMESTEPS == 0:
-                torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
-
-            if done or episode_len >= 5000:
-                break
-
-        end_time = time.time()
-        train_speed = episode_len / (end_time - start_time)
+            self.episode_reward = None
+            self.episode_len = None
+            self.episode_forward_reward = None
+            self.episode_ctrl_reward = None
+            self.step_num = None
+            self.eps_num = None
+            self.actor_losses = None
+            self.critic_losses = None
+            self.ent_coef_losses = None
+            self.ent_coefs = None
+            self.start_time = None
+            self.last_reward = None
+            self.last_info = None
+            self.force_done = False  
+            
+        def _on_training_start(self) -> None:
+            self.actual_log_dir = self.model.logger.get_dir()
+            self.writer = SummaryWriter(self.actual_log_dir)
+            
+            self.episode_reward = 0
+            self.episode_len = 0
+            self.episode_forward_reward = 0
+            self.episode_ctrl_reward = 0
+            self.step_num = 0
+            self.eps_num = 0
+            self.actor_losses = []
+            self.critic_losses = []
+            self.ent_coef_losses = []
+            self.ent_coefs = []
+            self.start_time = time.time()
+            self.last_reward = 0
+            self.last_info = {}
+            self.force_done = False
         
-        eps_num += 1
-        writer.add_scalar("ep/ep_rew", episode_reward, eps_num)
-        writer.add_scalar("ep/ep_len", episode_len, eps_num)
-        writer.add_scalar("ep/learning_rate", agent.lr, eps_num)
-        writer.add_scalar("ep/train_speed", train_speed, step_num)
-        if tb_step_recorder == "False":
-            writer.add_scalar("loss/actor_loss", np.array(actor_losses).mean(), step_num)
-            writer.add_scalar("loss/critic_loss", np.array(critic_losses).mean(), step_num)
-            writer.add_scalar("loss/ent_coef_loss", np.array(ent_coef_losses).mean(), step_num)
-            writer.add_scalar("loss/ent_coef", np.array(ent_coefs).mean(), step_num)
-        writer.flush()
-        if tb_step_recorder == "True":
-            writer.close()
-
-        print("--------------------------------")
-        print(f"Episode {eps_num}")
-        print(f"ep_rew: {episode_reward}")
-        print(f"ep_fw_rew: {episode_forward_reward}")
-        print(f"ep_ctrl_rew: {episode_ctrl_reward}")
-        print(f"ep_len: {episode_len}")
-        print(f"step_num: {step_num}")
-        print(f"learning_rate: {agent.lr}")
-        print(f"train_speed: {train_speed}")
-        print("--------------------------------")
+        def _on_step(self) -> bool:
+            if self.writer is None:
+                return True
+                
+            if self.episode_len >= self.max_episode_len and not self.force_done:
+                print(f"Episode length reached maximum ({self.max_episode_len} steps), forcing episode end")
+                self.force_done = True
+                
+                if hasattr(self.locals, 'dones'):
+                    self.locals['dones'][0] = True
+                elif 'dones' in self.locals:
+                    self.locals['dones'][0] = True
+                
+                self._on_episode_end()
+                return True
+                
+            if self.force_done:
+                return True
+                
+            rewards = self.locals.get('rewards')
+            infos = self.locals.get('infos')
+            
+            if rewards is not None and len(rewards) > 0:
+                self.last_reward = rewards[0]
+                
+            if infos is not None and len(infos) > 0:
+                self.last_info = infos[0]
+            
+            self.episode_reward += self.last_reward
+            self.episode_len += 1
+            
+            if "reward_forward" in self.last_info:
+                self.episode_forward_reward += self.last_info["reward_forward"]
+            if "reward_ctrl" in self.last_info:
+                self.episode_ctrl_reward += self.last_info["reward_ctrl"]
+            
+            self.step_num += 1
+            
+            dones = self.locals.get('dones')
+            if dones is not None and len(dones) > 0 and dones[0]:
+                self._on_episode_end()
+                    
+            return True
+        
+        def _on_episode_end(self):
+            end_time = time.time()
+            train_speed = self.episode_len / (end_time - self.start_time)
+            
+            self.eps_num += 1
+            self.writer.add_scalar("ep/ep_rew", self.episode_reward, self.eps_num)
+            self.writer.add_scalar("ep/ep_len", self.episode_len, self.eps_num)
+            self.writer.add_scalar("ep/learning_rate", self.model.learning_rate, self.eps_num)
+            self.writer.add_scalar("ep/train_speed", train_speed, self.step_num)
+            self.writer.add_scalar("ep/ep_fw_rew", self.episode_forward_reward, self.eps_num)
+            self.writer.add_scalar("ep/ep_ctrl_rew", self.episode_ctrl_reward, self.eps_num)
+            
+            if self.tb_step_recorder == "False":
+                if self.actor_losses:
+                    self.writer.add_scalar("loss/actor_loss", np.array(self.actor_losses).mean(), self.step_num)
+                if self.critic_losses:
+                    self.writer.add_scalar("loss/critic_loss", np.array(self.critic_losses).mean(), self.step_num)
+                if self.ent_coef_losses:
+                    self.writer.add_scalar("loss/ent_coef_loss", np.array(self.ent_coef_losses).mean(), self.step_num)
+                if self.ent_coefs:
+                    self.writer.add_scalar("loss/ent_coef", np.array(self.ent_coefs).mean(), self.step_num)
+            
+            self.writer.flush()
+            
+            print("--------------------------------")
+            print(f"Episode {self.eps_num} ({self.algo})")
+            print(f"ep_rew: {self.episode_reward}")
+            print(f"ep_fw_rew: {self.episode_forward_reward}")
+            print(f"ep_ctrl_rew: {self.episode_ctrl_reward}")
+            print(f"ep_len: {self.episode_len}")
+            print(f"step_num: {self.step_num}")
+            print(f"learning_rate: {self.model.learning_rate}")
+            print(f"train_speed: {train_speed} steps/sec")
+            
+            if self.force_done:
+                print(f"NOTE: Episode was force ended at {self.episode_len} steps (max allowed: {self.max_episode_len})")
+            
+            print("--------------------------------")
+            
+            self.episode_reward = 0
+            self.episode_len = 0
+            self.episode_forward_reward = 0
+            self.episode_ctrl_reward = 0
+            self.actor_losses = []
+            self.critic_losses = []
+            self.ent_coef_losses = []
+            self.ent_coefs = []
+            self.start_time = time.time()
+            self.force_done = False 
+        
+        def _on_rollout_end(self) -> None:
+            if hasattr(self.model, "logger") and hasattr(self.model.logger, "name_to_value"):
+                logs = self.model.logger.name_to_value
+                if "train/actor_loss" in logs:
+                    self.actor_losses.append(logs["train/actor_loss"])
+                if "train/critic_loss" in logs:
+                    self.critic_losses.append(logs["train/critic_loss"])
+                if "train/ent_coef_loss" in logs:
+                    self.ent_coef_losses.append(logs["train/ent_coef_loss"])
+                if "train/ent_coef" in logs:
+                    self.ent_coefs.append(logs["train/ent_coef"])
     
-    writer.close()
+    def close(self):
+        """关闭写入器"""
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+    
+    algo_log_dir = os.path.join(log_dir, algo.lower())
+    algo_model_dir = os.path.join(model_dir, algo.lower())
+    os.makedirs(algo_model_dir, exist_ok=True)
+    
+    custom_callback = TensorboardCallback(algo_log_dir, tb_step_recorder, algo)
+    
+    policy_kwargs = dict(activation_fn=torch.nn.ReLU, net_arch=[256, 256])
+    
+    if algo == "A2C":
+        model = A2C(
+            "MlpPolicy",
+            vec_env,
+            learning_rate=lr,
+            n_steps=5,
+            gamma=0.99,
+            gae_lambda=1.0,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            use_rms_prop=True,
+            policy_kwargs=policy_kwargs,
+            tensorboard_log=log_dir,
+            device=device,
+            verbose=0
+        )
+    elif algo == "PPO":
+        model = PPO(
+            "MlpPolicy",
+            vec_env,
+            learning_rate=lr,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            policy_kwargs=policy_kwargs,
+            tensorboard_log=log_dir,
+            device=device,
+            verbose=0
+        )
+    elif algo == "TD3":
+        model = TD3(
+            "MlpPolicy",
+            vec_env,
+            learning_rate=lr,
+            buffer_size=1000000,
+            learning_starts=10000,
+            batch_size=100,
+            gamma=0.99,
+            policy_kwargs=policy_kwargs,
+            tensorboard_log=log_dir,
+            device=device,
+            verbose=0
+        )
+    else:
+        raise ValueError(f"Unsupported algorithm: {algo}")
+    
+    
+    model.learn(
+            total_timesteps=10_000_000,
+            callback=custom_callback,
+            tb_log_name=f"{algo.lower()}_training",
+            progress_bar=False
+    )
+    custom_callback.writer.close()
+    
+    model.save(os.path.join(model_dir, f"{algo.lower()}_final_model"))
+    
 
 def test(env, path_to_model, saved_data_dir, simulation_seconds):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -299,9 +436,14 @@ if __name__ == "__main__":
                                     desired_direction = args.desired_direction,
                                     terminate_when_unhealthy = terminate_when_unhealthy)
         if args.starting_point and os.path.isfile(args.starting_point):
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx, starting_point= args.starting_point)
+            train(gymenv, args.log_dir, args.model_dir, 
+                lr=args.lr_SAC, gpu_idx=args.gpu_idx, 
+                starting_point=args.starting_point,
+                algo=args.sb3_algo)  
         else:
-            train(gymenv, args.log_dir, args.model_dir, lr=args.lr_SAC, gpu_idx=args.gpu_idx)
+            train(gymenv, args.log_dir, args.model_dir, 
+                lr=args.lr_SAC, gpu_idx=args.gpu_idx,
+                algo=args.sb3_algo)  
 
     if(args.test):
         if os.path.isfile(args.test):

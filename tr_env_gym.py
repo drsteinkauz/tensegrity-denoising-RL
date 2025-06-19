@@ -388,7 +388,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_length = np.array(self.data.ten_length)
         tendon_length_6 = tendon_length[:6]
 
-        state, observation, gt_log_intriparam = self._get_obs()
+        state, observation, gt_log_intriparam = self._get_obs(full=True)
 
 
         if self._desired_action == "turn":
@@ -400,7 +400,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                 # then this situation means that the tensegrity rolled from pi to -pi, and the delta should be positive
                 if psi_after < -np.pi/2 and old_psi > np.pi/2: 
                     psi_after = 2*np.pi + psi_after
-                # unless the tensegrity is rotating faster than pi /(self.dt*self._reward_delay_steps) rad/s
+                # unless the tensegrity is rotating faster than pi /(self.dt*self._get_obs()_reward_delay_steps) rad/s
                 # then this situation means that the tensegrity rolled from -pi to pi, and the delta should be negative
                 elif psi_after > np.pi/2 and old_psi < -np.pi/2:
                     psi_after = -2*np.pi + psi_after
@@ -526,9 +526,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if self.render_mode == "human":
             self.render()
         
-        return state, observation, gt_log_intriparam, reward, terminated, False, info
+        return  observation, reward, terminated, False, info
 
-    def _get_obs(self):
+    def _get_obs(self,full=False):
         
         
         """ rotation_r01 = Rotation.from_matrix(self.data.geom("r01").xmat.reshape(3,3)).as_quat() # 4
@@ -689,8 +689,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
                                             log_damping,  # damping of cross tendon
                                             log_stiffness, # stiffness of cross tendon
                                             log_mass]) # mass of body 1, 2, 3
-
-        return state, observation, gt_log_intriparam
+        if full == True:
+            return state,observation,gt_log_intriparam
+        return observation
 
     def _is_stable(self,arr, threshold=1e-3):
         if len(arr) < 3:
@@ -1001,7 +1002,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         obs_act_seq = []
         for i in range(64):
             self.do_simulation(tendons, self.frame_skip)
-            _, observation, _ = self._get_obs()
+            observation= self._get_obs()
             action = self.data.ctrl[:].copy()
             obs_act_seq.append(np.concatenate((observation, action)))
         obs_act_seq = np.array(obs_act_seq)
@@ -1011,9 +1012,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
         
-        state, observation, gt_log_intriparam = self._get_obs()
+        observation= self._get_obs()
 
-        return state, observation, gt_log_intriparam, obs_act_seq
+        return observation
 
     def viewer_setup(self):
         assert self.viewer is not None
