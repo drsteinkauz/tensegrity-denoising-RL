@@ -9,6 +9,20 @@ from collections.abc import Iterable
 from itertools import zip_longest
 from typing import List
 
+def set_seed(seed):
+    print(torch.backends.cudnn.deterministic,torch.backends.cudnn.benchmark )
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+def deset_seed():
+    torch.backends.cudnn.deterministic = False
+
 def weights_init_(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight, gain=1)
@@ -119,6 +133,8 @@ class GNNPolicyNetwork(nn.Module):
         super(GNNPolicyNetwork, self).__init__()
         self.gnn1 = GNNEncoder(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.gnn2 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
+        self.gnn3 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
+        self.gnn4 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.actor_head = ActorHead(hidden_dim=hidden_dim, edge_dim=edge_dim)
 
         self.apply(weights_init_)
@@ -129,6 +145,8 @@ class GNNPolicyNetwork(nn.Module):
         # edge_attr: [batch, edge_num, edge_dim]
         h = self.gnn1(nodes, edge_index, edge_attr)  # [batch, node_num, hidden_dim]
         h = self.gnn2(h, edge_index, edge_attr)  # [batch, node_num, hidden_dim]
+        h = self.gnn3(h, edge_index, edge_attr)
+        h = self.gnn4(h, edge_index, edge_attr)
         action_logits = self.actor_head(h, edge_index, edge_attr, edge_type_mask)  # [batch, active_edge_num, 2]
         
         mean = action_logits[:, :, 0]  # [batch, active_edge_num]
@@ -244,6 +262,7 @@ class SACAgent:
         
         # Networks
         self.gnn_actor = GNNPolicyNetwork(node_dim=self.node_dim, edge_dim=self.edge_dim).to(self.device)
+        set_seed(114514)
         self.critic = QNetwork(observation_dim, action_dim).to(self.device)
         self.target_critic = QNetwork(observation_dim, action_dim).to(self.device)
         
@@ -251,9 +270,11 @@ class SACAgent:
         self.target_critic.load_state_dict(self.critic.state_dict())
         
         # Optimizers
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
+        deset_seed()
         self.ent_coef_optimizer = torch.optim.Adam([self.log_ent_coef], lr=self.lr)
         self.gnn_actor_optimizer = optim.Adam(self.gnn_actor.parameters(), lr=self.lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
+        
         
         # Replay buffer
         self.replay_buffer = ReplayBuffer(capacity=self.buffer_size, obs_dim=observation_dim, action_dim=action_dim, device=self.device)
