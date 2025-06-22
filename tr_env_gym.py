@@ -746,8 +746,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         distance_bias = np.abs(distance * np.sin(yaw_diff))
 
         # potential = self._desired_direction * k_ALONG * distance_along * (1.0 + np.exp(-distance_bias**2 / (2*stdev_BIAS**2)))/2.0
-        potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
-        return potential
+        # potential = self._desired_direction * k_ALONG * distance_along * np.exp(-distance_bias**2 / (2*stdev_BIAS**2))
+        ditch_potential_ = k_ALONG * np.exp(-distance_bias**2 / (2*self._ditch_reward_stdev**2))
+        straight_potential = self._desired_direction * k_ALONG * distance_along
+        return ditch_potential_ + straight_potential
 
     def _arc_reward(self, xy_position_before, xy_position_after, curvature):
         k_ALONG = self._forrew_rate / self.dt
