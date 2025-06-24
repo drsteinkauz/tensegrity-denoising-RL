@@ -475,7 +475,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1000:
+            if self._step_num > 1000 and self._is_test==False:
                 terminated = True
             if np.linalg.norm(xy_position_after - self._waypt) < self._threshold_waypt:
                 terminated = True

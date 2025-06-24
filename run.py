@@ -185,7 +185,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only
         action_scaled, _ = actor.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
-        action_unscaled = action_scaled.detach() * 0.05
+        # action_unscaled = action_scaled.detach() * 0.05
         obs, _, done, _, info = env.step(action_scaled.detach().numpy())
 
 
@@ -310,12 +310,162 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, read_acto
     if env._desired_action == "tracking":
         np.save(os.path.join(saved_data_dir, "group_waypt_data.npy"),waypt_array)
 
+def traj_test(env, path_to_model_tr, path_to_model_ccw, path_to_model_cw, saved_data_dir, simulation_seconds, read_actor_only):
+    way_points = np.array([[0.0, 3.0], [3.0, 0.0], [6.0, 3.0], [6.0, 0.0]])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Initialize the graph structure
+    node_obs_dim = 6 # cap position*3, cap velocity*3
+    tr_global_obs_dim = 2
+    ccw_global_obs_dim = 0
+    cw_global_obs_dim = 0
+    node_dim_tr = node_obs_dim + tr_global_obs_dim
+    node_dim_ccw = node_obs_dim + ccw_global_obs_dim
+    node_dim_cw = node_obs_dim + cw_global_obs_dim
+    edge_dim = 2 # edge type, distance
+    hidden_dim = 128
+
+    node_num = 6 # 6 caps
+    edge_type = torch.zeros((24, 1), dtype=torch.float32).to(device)
+    edge_type[0:12, 0] = 1 # edge type: active tendon * 6
+    edge_type[12:18, 0] = 2 # edge type: passive tendon * 3
+    edge_type[18:24, 0] = 0 # edge type: bar * 3
+    edge_type_mask = (edge_type[:, 0] == 1)  # mask for active edges
+
+    if env._robot_type == "j":
+        edge_index = torch.tensor([[4, 0, 0, 2, 2, 4, 5, 1, 1, 3, 3, 5, 1, 4, 0, 3, 2, 5, 0, 1, 2, 3, 4, 5],
+                                   [0, 4, 2, 0, 4, 2, 1, 5, 3, 1, 5, 3, 4, 1, 3, 0, 5, 2, 1, 0, 3, 2, 5, 4]], dtype=torch.long).to(device)
+    elif env._robot_type == "w":
+        raise NotImplementedError("Graph type 'w' is not implemented yet.")
+    else:
+        raise ValueError("Unsupported graph type. Use 'j' for jonathan's configration or 'w' for will's configration.")
+    
+    actor_tr = gnn_sac.GNNPolicyNetwork(node_dim=node_dim_tr, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
+    actor_ccw = gnn_sac.GNNPolicyNetwork(node_dim=node_dim_ccw, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
+    actor_cw = gnn_sac.GNNPolicyNetwork(node_dim=node_dim_cw, edge_dim=edge_dim, hidden_dim=hidden_dim).to(device)
+    state_dict_tr = torch.load(path_to_model_tr, map_location=torch.device(device=device))
+    state_dict_ccw = torch.load(path_to_model_ccw, map_location=torch.device(device=device))
+    state_dict_cw = torch.load(path_to_model_cw, map_location=torch.device(device=device))
+    if not read_actor_only:
+        state_dict_tr = state_dict_tr['gnn_actor_state_dict']
+        state_dict_ccw = state_dict_ccw['gnn_actor_state_dict']
+        state_dict_cw = state_dict_cw['gnn_actor_state_dict']
+    state_dict_tr = {k.replace("module.", ""): v for k, v in state_dict_tr.items()}
+    state_dict_ccw = {k.replace("module.", ""): v for k, v in state_dict_ccw.items()}
+    state_dict_cw = {k.replace("module.", ""): v for k, v in state_dict_cw.items()}
+    actor_tr.load_state_dict(state_dict_tr)
+    actor_ccw.load_state_dict(state_dict_ccw)
+    actor_cw.load_state_dict(state_dict_cw)
+    os.makedirs(saved_data_dir, exist_ok=True)
+
+    obs = env.reset()[0]
+    crt_yaw = env._reset_psi
+    crt_x = env._oripoint[0]
+    crt_y = env._oripoint[1]
+    waypt_idx = 0
+    straight_stage = False
+    waypt_thresh = 0.25
+    yaw_thresh = np.array([10.0, 15.0]) * np.pi / 180.0
+    done = False
+    extra_steps = 500
+
+    op = env._oripoint
+    op = op.reshape(1, 2)
+    way_points = way_points + op.repeat(way_points.shape[0], axis=0)
+
+    dt = env.dt
+    actions_list = []
+    tendon_length_list = []
+    cap_posi_list = []
+    reward_forward_list = []
+    reward_ctrl_list = []
+    x_pos_list = []
+    y_pos_list = []
+    iter = int(simulation_seconds/dt)
+
+    for i in range(iter):
+        if np.linalg.norm(way_points[waypt_idx] - np.array([crt_x, crt_y])) < waypt_thresh:
+            print(f"Reached waypoint {waypt_idx} at ({crt_x}, {crt_y})")
+            waypt_idx += 1
+            if waypt_idx >= way_points.shape[0]:
+                print("Reached the final waypoint, stopping.")
+                break
+            straight_stage = False
+        tgt_yaw = np.arctan2(way_points[waypt_idx, 1] - crt_y, way_points[waypt_idx, 0] - crt_x)
+        yaw_diff = tgt_yaw - crt_yaw
+        yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))  # Normalize the angle difference to [-pi, pi]
+        if yaw_diff > yaw_thresh[1] and straight_stage==False: # turn ccw
+        # if yaw_diff > yaw_thresh[1]: # turn ccw
+            obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim_ccw, edge_dim, edge_index, edge_type)
+            action_scaled, _ = actor_ccw.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
+            action_scaled = torch.tanh(action_scaled)
+            obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        elif yaw_diff < yaw_thresh[0] and straight_stage==False: # turn cw
+        # elif yaw_diff < yaw_thresh[0]: # turn cw
+            obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim_cw, edge_dim, edge_index, edge_type)
+            action_scaled, _ = actor_cw.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
+            action_scaled = torch.tanh(action_scaled)
+            obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        else: # go straight
+            # if not straight_stage:
+            #     print("Switching to straight stage")
+            straight_stage = True
+            tracking_cmd = np.array([way_points[waypt_idx, 0] - crt_x, way_points[waypt_idx, 1] - crt_y])
+            if np.linalg.norm(tracking_cmd) > 1.0:
+                tracking_cmd = tracking_cmd / np.linalg.norm(tracking_cmd)
+            obs[36:38] = tracking_cmd
+            obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim_tr, edge_dim, edge_index, edge_type)
+            action_scaled, _ = actor_tr.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
+            action_scaled = torch.tanh(action_scaled)
+            obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        
+        actions_list.append(action_scaled.detach().numpy().squeeze())
+        tendon_length_list.append(info["tendon_length"])
+        cap_posi_list.append(info["real_observation"][:18])
+        reward_forward_list.append(info["reward_forward"])
+        reward_ctrl_list.append(info["reward_ctrl"])
+        crt_yaw = info["psi"]
+        crt_x = info["x_position"]
+        crt_y = info["y_position"]
+        x_pos_list.append(info["x_position"])
+        y_pos_list.append(info["y_position"])
+        
+        if done:
+            extra_steps -= 1
+            if extra_steps < 0:
+                break
+    
+    action_array = np.array(actions_list)
+    tendon_length_array = np.array(tendon_length_list)
+    cap_posi_array = np.array(cap_posi_list)
+    reward_forward_array = np.array(reward_forward_list)
+    reward_ctrl_array = np.array(reward_ctrl_list)
+    x_pos_array = np.array(x_pos_list)
+    y_pos_array = np.array(y_pos_list)
+    oript_array = np.array(env._oripoint)
+    iniyaw_array = np.array([env._reset_psi])
+    np.save(os.path.join(saved_data_dir, "action_data.npy"),action_array)
+    np.save(os.path.join(saved_data_dir, "tendon_data.npy"),tendon_length_array)
+    np.save(os.path.join(saved_data_dir, "cap_posi_data.npy"),cap_posi_array)
+    np.save(os.path.join(saved_data_dir, "reward_forward_data.npy"),reward_forward_array)
+    np.save(os.path.join(saved_data_dir, "reward_ctrl_data.npy"),reward_ctrl_array)
+    np.save(os.path.join(saved_data_dir, "x_pos_data.npy"),x_pos_array)
+    np.save(os.path.join(saved_data_dir, "y_pos_data.npy"),y_pos_array)
+    np.save(os.path.join(saved_data_dir, "oript_data.npy"),oript_array)
+    np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
+    np.save(os.path.join(saved_data_dir, "waypt_data.npy"),way_points)
+
+
 def _obs_to_graph_input(observation, device, node_num, node_dim, edge_dim, edge_index, edge_type):
         # observation: [batch, obs_dim]
+        if node_dim < 6:
+            raise ValueError("node_dim must be at least 6 to accommodate cap position and velocity.")
         nodes = torch.zeros(observation.shape[0], node_num, node_dim, dtype=torch.float32, device=observation.device)
         nodes[:, :, 0:3] = observation[:, :18].view(-1, 6, 3) # cap position
         nodes[:, :, 3:6] = observation[:, 18:36].view(-1, 6, 3) # cap velocity
-        nodes[:, :, 6:] = observation[:, 36:].unsqueeze(1).expand(-1, node_num, -1)  # global observation
+        if node_dim > 6:
+            nodes[:, :, 6:] = observation[:, 36:].unsqueeze(1).expand(-1, node_num, -1)  # global observation
 
         edge_attr = torch.zeros((observation.shape[0], edge_index.shape[1], edge_dim), dtype=torch.float32, device=observation.device)
         edge_type_expanded = edge_type.expand(observation.shape[0], -1, -1)
@@ -350,6 +500,8 @@ if __name__ == "__main__":
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--test', metavar='path_to_model')
     parser.add_argument('--group_test', metavar='path_to_model')
+    parser.add_argument('--traj_test', nargs=3, metavar=('path_to_model_tr', 'path_to_model_ccw', 'path_to_model_cw'),
+                        help='path to the trained model for trajectory testing, three models for straight, counterclockwise and clockwise')
     parser.add_argument('--starting_point', metavar='path_to_starting_model')
     parser.add_argument('--env_xml', default="w", type=str, choices=["w", "j", "3tr_will_normal_size.xml", "3prism_jonathan_steady_side.xml"],
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
@@ -439,3 +591,15 @@ if __name__ == "__main__":
             group_test(gymenv, path_to_model=args.group_test, saved_data_dir="group_test_data", simulation_seconds = args.simulation_seconds, read_actor_only = save_or_read_actor_only, group_num=32)
         else:
             print(f'{args.group_test} not found.')
+
+    if(args.traj_test):
+        if os.path.isfile(args.traj_test[0]) and os.path.isfile(args.traj_test[1]) and os.path.isfile(args.traj_test[2]):
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
+                                        xml_file=os.path.join(os.getcwd(),args.env_xml),
+                                        robot_type=robot_type,
+                                        is_test = True,
+                                        desired_action = "tracking",
+                                        desired_direction = args.desired_direction)
+            traj_test(gymenv, path_to_model_tr=args.traj_test[0], path_to_model_ccw=args.traj_test[1], path_to_model_cw=args.traj_test[2], saved_data_dir="traj_test_data", simulation_seconds = args.simulation_seconds, read_actor_only=save_or_read_actor_only)
+        else:
+            print(f'{args.traj_test} not found.')
