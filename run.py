@@ -42,7 +42,7 @@ def train(env, log_dir, model_dir, lr, save_actor_only, gpu_idx=None, tb_step_re
         writer = SummaryWriter(log_dir)
 
     while True:
-        _, observation, _, _ = env.reset()[0]
+        observation = env.reset()[0]
         episode_reward = 0
         episode_len = 0
         episode_forward_reward = 0
@@ -63,7 +63,7 @@ def train(env, log_dir, model_dir, lr, save_actor_only, gpu_idx=None, tb_step_re
                 action_scaled = np.random.uniform(-1, 1, size=(6,))
             else:
                 action_scaled = agent.select_action(observation)
-            _, next_observation, _, reward, done, _, info_env = env.step(action_scaled)
+            next_observation, reward, done, _, info_env = env.step(action_scaled)
             agent.replay_buffer.push(observation, action_scaled, reward, next_observation, done)
             info_agent = agent.update()
             
@@ -164,7 +164,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only
     actor.load_state_dict(state_dict)
     os.makedirs(saved_data_dir, exist_ok=True)
 
-    _, obs, _, _ = env.reset()[0]
+    obs = env.reset()[0]
     done = False
     extra_steps = 500
 
@@ -186,7 +186,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         action_unscaled = action_scaled.detach() * 0.05
-        _, obs, _, _, done, _, info = env.step(action_scaled.detach().numpy())
+        obs, _, done, _, info = env.step(action_scaled.detach().numpy())
 
 
 
@@ -271,7 +271,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, read_acto
     if env._desired_action == "tracking":
         waypt_list = []
     for i in range(group_num):
-        _, obs, _, _ = env.reset()[0]
+        obs = env.reset()[0]
         done = False
         extra_steps = 500
 
@@ -283,7 +283,7 @@ def group_test(env, path_to_model, saved_data_dir, simulation_seconds, read_acto
             # action_scaled, _ = actor.predict(torch.from_numpy(obs).float())
             action_scaled, _ = actor.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
             action_scaled = torch.tanh(action_scaled)
-            _, obs, _, _, done, _, info = env.step(action_scaled.detach().numpy())
+            obs, _, done, _, info = env.step(action_scaled.detach().numpy())
 
             if done:
                 extra_steps -= 1
@@ -355,7 +355,7 @@ if __name__ == "__main__":
                         help="ther name of the xml file for the mujoco environment, should be in same directory as run.py")
     parser.add_argument('--sb3_algo', default="SAC", type=str, choices=["SAC", "TD3", "A2C", "PPO"],
                         help='StableBaseline3 RL algorithm: SAC, TD3, A2C, PPO')
-    parser.add_argument('--desired_action', default="straight", type=str, choices=["straight", "turn", "tracking", "arc", "vel_track"],
+    parser.add_argument('--desired_action', default="straight", type=str, choices=["straight", "turn", "tracking", "arc"],
                         help="either straight or turn, determines what the agent is learning")
     parser.add_argument('--desired_direction', default=1, type=int, choices=[-1, 1], 
                         help="either 1 or -1, 1 means roll forward or turn counterclockwise,-1 means roll backward or turn clockwise")
