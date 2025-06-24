@@ -367,6 +367,8 @@ def traj_test(env, path_to_model_tr, path_to_model_ccw, path_to_model_cw, saved_
     straight_stage = False
     waypt_thresh = 0.25
     yaw_thresh = np.array([10.0, 15.0]) * np.pi / 180.0
+    yaw_thresh_radius = (yaw_thresh[1] - yaw_thresh[0]) / 2.0
+    yaw_thresh_center = yaw_thresh[0] + yaw_thresh_radius
     done = False
     extra_steps = 500
 
@@ -393,15 +395,22 @@ def traj_test(env, path_to_model_tr, path_to_model_ccw, path_to_model_cw, saved_
                 break
             straight_stage = False
         tgt_yaw = np.arctan2(way_points[waypt_idx, 1] - crt_y, way_points[waypt_idx, 0] - crt_x)
-        yaw_diff = tgt_yaw - crt_yaw
+        tgt_yaw_center = tgt_yaw - yaw_thresh_center
+        tgt_yaw_center = np.arctan2(np.sin(tgt_yaw_center), np.cos(tgt_yaw_center))
+        yaw_diff = tgt_yaw_center - crt_yaw
         yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))  # Normalize the angle difference to [-pi, pi]
-        if yaw_diff > yaw_thresh[1] and straight_stage==False: # turn ccw
+        if yaw_diff < -np.pi/2.0 or yaw_diff > np.pi/2.0: # toward forward tracking or backward tracking
+            tgt_yaw_center = tgt_yaw_center - np.pi
+            tgt_yaw_center = np.arctan2(np.sin(tgt_yaw_center), np.cos(tgt_yaw_center))
+            yaw_diff = tgt_yaw_center - crt_yaw
+            yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))  # Normalize the angle difference to [-pi, pi]
+        if yaw_diff > yaw_thresh_radius and straight_stage==False: # turn ccw
         # if yaw_diff > yaw_thresh[1]: # turn ccw
             obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim_ccw, edge_dim, edge_index, edge_type)
             action_scaled, _ = actor_ccw.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
             action_scaled = torch.tanh(action_scaled)
             obs, _, done, _, info = env.step(action_scaled.detach().numpy())
-        elif yaw_diff < yaw_thresh[0] and straight_stage==False: # turn cw
+        elif yaw_diff < -yaw_thresh_radius and straight_stage==False: # turn cw
         # elif yaw_diff < yaw_thresh[0]: # turn cw
             obs_graph_nodes, obs_graph_edge_attr = _obs_to_graph_input(torch.from_numpy(obs).float().unsqueeze(0).to(device), device, node_num, node_dim_cw, edge_dim, edge_index, edge_type)
             action_scaled, _ = actor_cw.forward(obs_graph_nodes, edge_index, obs_graph_edge_attr, edge_type_mask)
