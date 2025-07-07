@@ -360,9 +360,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         elif self._robot_type == "j":
             self.data.ctrl[:] = action.copy()
             for _ in range(self.frame_skip):
-                crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.17 - 1), -4 * np.ones(6))
-                crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
-                self.model.actuator_forcerange[:, 0] = crt_min_force
+                # crt_min_force = np.minimum(267 * (-self.data.actuator_velocity / 0.17 - 1), -4 * np.ones(6))
+                # crt_min_force = np.maximum(crt_min_force, -267* np.ones(6))
+                # self.model.actuator_forcerange[:, 0] = crt_min_force
                 mujoco.mj_step(self.model, self.data)
             mujoco.mj_rnePostConstraint(self.model, self.data)
         
