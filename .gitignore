@@ -4,7 +4,9 @@ __pycache__/
 events.*
 *.pth
 !actors/*.pth
+!selected_trained_agents/*.pth
 saved_data/*.ipynb
 group_test_data/*.ipynb
+traj_test_data/*.ipynb
 results_*
 *.json

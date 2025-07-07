@@ -15,3 +15,7 @@ To test a trained RL model with task "tracking" for several episodes to see an o
 ```
 python3 run.py --group_test ./actors/actor_5425000_18nipfa5t.pth --env_xml w --desired_action tracking --simulation_seconds 20
 ```
+For a simple multi-waypoint trajectory test, use hybrid motions with:
+```
+python3 run.py --traj_test ./selected_trained_agents/agent_8300000_tracking.pth ./selected_trained_agents/agent_8500000_turnccw.pth ./selected_trained_agents/agent_12900000_turncw.pth --simulation_seconds 360 --env_xml j
+```

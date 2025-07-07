@@ -30,9 +30,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         use_contact_forces=False,
         use_tendon_length=False,
         use_cap_velocity=True,
-        use_stability_detection=False,
         use_obs_noise=False,
-        use_intrinsic_params_dr=False,
         terminate_when_unhealthy=True,
         is_test = False,
         desired_action = "straight",
@@ -55,8 +53,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_max_vel_w = 0.05,
         tendon_reset_mean_j = 0.15,
         tendon_reset_stdev_j = 0.2,
-        tendon_max_length_j = 0.15,
-        tendon_min_length_j = -0.35,
+        tendon_max_length_j = 0.30,
+        tendon_min_length_j = -0.45,
         tendon_max_vel_j = 0.15,
         friction_noise_dist_w = (1.0, 4.0),
         damping_noise_dist_cross_w = (10.0, 4.0),
@@ -95,9 +93,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             use_contact_forces,
             use_tendon_length,
             use_cap_velocity,
-            use_stability_detection,
             use_obs_noise,
-            use_intrinsic_params_dr,
             terminate_when_unhealthy,
             is_test,
             desired_action,
@@ -157,10 +153,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         self._psi_wrap_around_count = 0
         self._use_tendon_length = use_tendon_length
         self._use_cap_velocity = use_cap_velocity
-        self._use_stability_detection = use_stability_detection
 
         self._use_obs_noise = use_obs_noise
-        self._use_intrinsic_params_dr = use_intrinsic_params_dr
 
         self._min_reset_heading = min_reset_heading
         self._max_reset_heading = max_reset_heading
@@ -249,12 +243,8 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             obs_shape += 9
         if use_cap_velocity:
             obs_shape += 18
-        if use_stability_detection:
-            obs_shape += 1
         if use_contact_forces:
             obs_shape += 84
-        if desired_action == "vel_track":
-            obs_shape += 3 # cmd lin_vel * 2 + ang_vel * 1
         elif desired_action == "tracking":
             obs_shape += 2 # tracking vector x, y
         
@@ -320,7 +310,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             min_velocity = 0.1
             is_healthy = np.isfinite(state).all() and (np.any(bar_speeds > min_velocity) )    
 
-        else: #self._desired_action == "straight" or self._desired_action == "arc" or self._desired_action == "tracking" or self._desired_action == "vel_track":
+        else: #self._desired_action == "straight" or self._desired_action == "arc" or self._desired_action == "tracking":
             min_velocity = 0.0001
             is_healthy = np.isfinite(state).all() and ((self._x_velocity > min_velocity or self._x_velocity < -min_velocity) \
                                                         or (self._y_velocity > min_velocity or self._y_velocity < -min_velocity) )
@@ -391,7 +381,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         tendon_length = np.array(self.data.ten_length)
         tendon_length_6 = tendon_length[:6]
 
-        state, observation, gt_log_intriparam = self._get_obs()
+        observation = self._get_obs()
 
 
         if self._desired_action == "turn":
@@ -485,25 +475,10 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             healthy_reward = 0
 
             terminated = self.terminated  
-            if self._step_num > 1000:
+            if self._step_num > 1000 and self._is_test==False:
                 terminated = True
             if np.linalg.norm(xy_position_after - self._waypt) < self._threshold_waypt:
                 terminated = True
-        
-        elif self._desired_action == "vel_tracking":
-            ang_vel_bwd = self._angle_normalize(psi_after - psi_before)/self.dt
-            vel_bwd = np.array([self._x_velocity, self._y_velocity, ang_vel_bwd])
-            vel_cmd = state[-3:]
-            forward_reward = self._vel_track_rew(vel_cmd=vel_cmd, vel_bwd=vel_bwd)
-
-            costs = ctrl_cost = self.control_cost(action, tendon_length_6)
-
-            if self._terminate_when_unhealthy:
-                healthy_reward = self.healthy_reward
-            else:
-                healthy_reward = 0
-            
-            terminated = self.terminated
         
 
         rewards = forward_reward + healthy_reward
@@ -543,7 +518,7 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         if self.render_mode == "human":
             self.render()
         
-        return state, observation, gt_log_intriparam, reward, terminated, False, info
+        return observation, reward, terminated, False, info
 
     def _get_obs(self):
         
@@ -593,61 +568,55 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         random = rng.standard_normal(size=9)
         tendon_lengths_with_noise = random * self._obs_noise_tendon_stdev + tendon_lengths # 9
 
-        if self._use_stability_detection:
-            z_cap = [pos_r01_left_end[-1],pos_r01_right_end[-1],pos_r23_left_end[-1],pos_r23_right_end[-1],pos_r45_left_end[-1],pos_r45_right_end[-1]]
-            stability = self._is_stable(z_cap,threshold=1e-3)
-            state = np.concatenate(([stability],pos_rel_s0,pos_rel_s1,pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-            state_with_noise = np.concatenate(([stability],pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
-        else:
-            state = np.concatenate((pos_rel_s0, pos_rel_s1, pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
-            state_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
+        # cap position
+        cap_position = np.concatenate((pos_rel_s0, pos_rel_s1, pos_rel_s2, pos_rel_s3, pos_rel_s4, pos_rel_s5))
+        cap_position_with_noise = np.concatenate((pos_rel_s0_with_noise, pos_rel_s1_with_noise, pos_rel_s2_with_noise, pos_rel_s3_with_noise, pos_rel_s4_with_noise, pos_rel_s5_with_noise))
         
-        if self._use_cap_velocity:
-            velocity = self.data.qvel # 18
+        # cap velocity
+        velocity = self.data.qvel # 18
 
-            vel_lin_r01 = np.array([velocity[0], velocity[1], velocity[2]])
-            vel_ang_r01 = np.array([velocity[3], velocity[4], velocity[5]])
-            vel_lin_r23 = np.array([velocity[6], velocity[7], velocity[8]])
-            vel_ang_r23 = np.array([velocity[9], velocity[10], velocity[11]])
-            vel_lin_r45 = np.array([velocity[12], velocity[13], velocity[14]])
-            vel_ang_r45 = np.array([velocity[15], velocity[16], velocity[17]])
+        vel_lin_r01 = np.array([velocity[0], velocity[1], velocity[2]])
+        vel_ang_r01 = np.array([velocity[3], velocity[4], velocity[5]])
+        vel_lin_r23 = np.array([velocity[6], velocity[7], velocity[8]])
+        vel_ang_r23 = np.array([velocity[9], velocity[10], velocity[11]])
+        vel_lin_r45 = np.array([velocity[12], velocity[13], velocity[14]])
+        vel_ang_r45 = np.array([velocity[15], velocity[16], velocity[17]])
 
-            s0_r01_pos = pos_r01_left_end - self.data.body("r01_body").xpos.copy()
-            s1_r01_pos = pos_r01_right_end - self.data.body("r01_body").xpos.copy()
-            s2_r23_pos = pos_r23_left_end - self.data.body("r23_body").xpos.copy()
-            s3_r23_pos = pos_r23_right_end - self.data.body("r23_body").xpos.copy()
-            s4_r45_pos = pos_r45_left_end - self.data.body("r45_body").xpos.copy()
-            s5_r45_pos = pos_r45_right_end - self.data.body("r45_body").xpos.copy()
+        s0_r01_pos = pos_r01_left_end - self.data.body("r01_body").xpos.copy()
+        s1_r01_pos = pos_r01_right_end - self.data.body("r01_body").xpos.copy()
+        s2_r23_pos = pos_r23_left_end - self.data.body("r23_body").xpos.copy()
+        s3_r23_pos = pos_r23_right_end - self.data.body("r23_body").xpos.copy()
+        s4_r45_pos = pos_r45_left_end - self.data.body("r45_body").xpos.copy()
+        s5_r45_pos = pos_r45_right_end - self.data.body("r45_body").xpos.copy()
 
-            vel_s0 = vel_lin_r01 + np.cross(vel_ang_r01, s0_r01_pos) # 3
-            vel_s1 = vel_lin_r01 + np.cross(vel_ang_r01, s1_r01_pos) # 3
-            vel_s2 = vel_lin_r23 + np.cross(vel_ang_r23, s2_r23_pos) # 3
-            vel_s3 = vel_lin_r23 + np.cross(vel_ang_r23, s3_r23_pos) # 3
-            vel_s4 = vel_lin_r45 + np.cross(vel_ang_r45, s4_r45_pos) # 3
-            vel_s5 = vel_lin_r45 + np.cross(vel_ang_r45, s5_r45_pos) # 3
+        vel_s0 = vel_lin_r01 + np.cross(vel_ang_r01, s0_r01_pos) # 3
+        vel_s1 = vel_lin_r01 + np.cross(vel_ang_r01, s1_r01_pos) # 3
+        vel_s2 = vel_lin_r23 + np.cross(vel_ang_r23, s2_r23_pos) # 3
+        vel_s3 = vel_lin_r23 + np.cross(vel_ang_r23, s3_r23_pos) # 3
+        vel_s4 = vel_lin_r45 + np.cross(vel_ang_r45, s4_r45_pos) # 3
+        vel_s5 = vel_lin_r45 + np.cross(vel_ang_r45, s5_r45_pos) # 3
 
-            random = rng.standard_normal(size=3)
-            vel_s0_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s0 # 3
-            random = rng.standard_normal(size=3)
-            vel_s1_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s1 # 3
-            random = rng.standard_normal(size=3)
-            vel_s2_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s2 # 3
-            random = rng.standard_normal(size=3)
-            vel_s3_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s3 # 3
-            random = rng.standard_normal(size=3)
-            vel_s4_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s4 # 3
-            random = rng.standard_normal(size=3)
-            vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
+        random = rng.standard_normal(size=3)
+        vel_s0_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s0 # 3
+        random = rng.standard_normal(size=3)
+        vel_s1_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s1 # 3
+        random = rng.standard_normal(size=3)
+        vel_s2_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s2 # 3
+        random = rng.standard_normal(size=3)
+        vel_s3_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s3 # 3
+        random = rng.standard_normal(size=3)
+        vel_s4_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s4 # 3
+        random = rng.standard_normal(size=3)
+        vel_s5_with_noise = random * self._obs_noise_cap_pos_stdev + vel_s5 # 3
 
-            state = np.concatenate((state,\
-                                        vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
-            state_with_noise = np.concatenate((state,\
-                                        vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
-            
-        if self._use_tendon_length:
-            state = np.concatenate((state, tendon_lengths))
-            state_with_noise = np.concatenate((state_with_noise, tendon_lengths_with_noise))
+        cap_velocity = np.concatenate((vel_s0, vel_s1, vel_s2, vel_s3, vel_s4, vel_s5))
+        cap_velocity_with_noise = np.concatenate((vel_s0_with_noise, vel_s1_with_noise, vel_s2_with_noise, vel_s3_with_noise, vel_s4_with_noise, vel_s5_with_noise))
+        
+        # tendon length
+        tendon_length = np.array(tendon_lengths)
+        tendon_length_with_noise = np.array(tendon_lengths_with_noise)
 
+        # tracking vector
         if self._desired_action == "tracking":
             tracking_vec = self._waypt - pos_center[:2]
             tgt_drct = tracking_vec / np.linalg.norm(tracking_vec)
@@ -659,55 +628,31 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             tgt_yaw_with_noise = np.array([np.arctan2(tgt_drct_with_noise[1], tgt_drct_with_noise[0])])
 
             if np.linalg.norm(tracking_vec) < 1.0:
-                state = np.concatenate((state,\
-                                            tracking_vec))
-                state_with_noise = np.concatenate((state_with_noise,\
-                                                        tracking_vec_with_noise))
+                tracking_cmd = np.array(tracking_vec)
+                tracking_cmd_with_noise = np.array((tracking_vec_with_noise))
             else:
-                state = np.concatenate((state,\
-                                            tgt_drct))
-                state_with_noise = np.concatenate((state_with_noise,\
-                                                        tgt_drct_with_noise))
-        
-        elif self._desired_action == "vel_track":
-            vel_cmd = np.array([self._lin_vel_cmd[0], self._lin_vel_cmd[1], self._ang_vel_cmd])
-            state = np.concatenate((state, vel_cmd))
-            state_with_noise = np.concatenate((state_with_noise, vel_cmd))
-        
+                tracking_cmd = np.array((tgt_drct))
+                tracking_cmd_with_noise = np.array((tgt_drct_with_noise))
+
+        # get observation
+        state = cap_position
+        state_with_noise = cap_position_with_noise
+        if self._use_cap_velocity:
+            state = np.concatenate((state, cap_velocity))
+            state_with_noise = np.concatenate((state_with_noise, cap_velocity_with_noise))
+        if self._use_tendon_length:
+            state = np.concatenate((state, tendon_length))
+            state_with_noise = np.concatenate((state_with_noise, tendon_length_with_noise))
+        if self._desired_action == "tracking":
+            state = np.concatenate((state, tracking_cmd))
+            state_with_noise = np.concatenate((state_with_noise, tracking_cmd_with_noise))
+
         if self._use_obs_noise == True:
-            observation = state_with_noise
+            observation = state_with_noise.copy()
         else:
-            observation = state
-        
-        if self._robot_type == "w":
-            log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-            log_damping = np.array([np.log(self.model.tendon_damping[12] / self._damping_noise_dist_cross[0]),
-                                    np.log(self.model.tendon_damping[13] / self._damping_noise_dist_cross[0]),
-                                    np.log(self.model.tendon_damping[14] / self._damping_noise_dist_cross[0])])
-            log_stiffness = np.array([np.log(self.model.tendon_stiffness[12] / self._stiffness_noise_dist_cross[0]),
-                                      np.log(self.model.tendon_stiffness[13] / self._stiffness_noise_dist_cross[0]),
-                                      np.log(self.model.tendon_stiffness[14] / self._stiffness_noise_dist_cross[0])])
-            log_mass = np.array([np.log(self.model.body_mass[1] / self._mass_noise_dist[0]),
-                                 np.log(self.model.body_mass[2] / self._mass_noise_dist[0]),
-                                 np.log(self.model.body_mass[3] / self._mass_noise_dist[0])])
-        elif self._robot_type == "j":
-            log_friction = np.log(self.model.geom_friction[0, 0] / self._friction_noise_dist[0])
-            log_damping = np.array([np.log(self.model.tendon_damping[6] / self._damping_noise_dist_cross[0]),
-                                    np.log(self.model.tendon_damping[7] / self._damping_noise_dist_cross[0]),
-                                    np.log(self.model.tendon_damping[8] / self._damping_noise_dist_cross[0])])
-            log_stiffness = np.array([np.log(self.model.tendon_stiffness[6] / self._stiffness_noise_dist_cross[0]),
-                                      np.log(self.model.tendon_stiffness[7] / self._stiffness_noise_dist_cross[0]),
-                                      np.log(self.model.tendon_stiffness[8] / self._stiffness_noise_dist_cross[0])])
-            log_mass = np.array([np.log(self.model.body_mass[1] / self._mass_noise_dist[0]),
-                                 np.log(self.model.body_mass[2] / self._mass_noise_dist[0]),
-                                 np.log(self.model.body_mass[3] / self._mass_noise_dist[0])])
+            observation = state.copy()
 
-        gt_log_intriparam = np.concatenate([np.array([log_friction]),  # friction coefficient
-                                            log_damping,  # damping of cross tendon
-                                            log_stiffness, # stiffness of cross tendon
-                                            log_mass]) # mass of body 1, 2, 3
-
-        return state, observation, gt_log_intriparam
+        return observation
 
     def _is_stable(self,arr, threshold=1e-3):
         if len(arr) < 3:
@@ -797,17 +742,6 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
 
         return along_reward + bias_reward
     
-    def _vel_track_rew(self, vel_cmd, vel_bwd):
-        track_stdev = np.array([5.0, 7.0])
-        track_amplitude = np.array([1.0, 0.5])
-        lin_vel_err = np.linalg.norm(vel_bwd[0:2] - vel_cmd[0:2])
-        ang_vel_err = vel_bwd[2] - vel_cmd[2]
-
-        lin_track_rew = track_amplitude[0] * np.exp(-track_stdev[0] * lin_vel_err**2)
-        ang_track_rew = track_amplitude[1] * np.exp(-track_stdev[1] * ang_vel_err**2)
-
-        return lin_track_rew + ang_track_rew
-    
     def _action_filter(self, action, last_action):
         k_FILTER = 1.0
         vel_constraint = self._tendon_max_vel
@@ -820,59 +754,9 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
         filtered_action = last_action + del_action
         return filtered_action
 
-    def _reset_intrinsic_params(self):
-        rand_itpr = np.random.uniform(-1, 1, size=(self.intriparam_shape,))
-
-        friction_coeff = np.exp(rand_itpr[0] * np.log(self._friction_noise_dist[1])) * self._friction_noise_dist[0]
-        damping_coeff = np.exp(rand_itpr[1:4] * np.log(self._damping_noise_dist_cross[1])) * self._damping_noise_dist_cross[0]
-        stiffness_coeff = np.exp(rand_itpr[4:7] * np.log(self._stiffness_noise_dist_cross[1])) * self._stiffness_noise_dist_cross[0]
-        mass_coeff = np.exp(rand_itpr[7:10] * np.log(self._mass_noise_dist[1])) * self._mass_noise_dist[0]
-        inertia_coeff = np.array([np.exp(rand_itpr[7] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
-                                  np.exp(rand_itpr[8] * np.log(self._mass_noise_dist[1])) * self._inertia_mean,
-                                  np.exp(rand_itpr[9] * np.log(self._mass_noise_dist[1])) * self._inertia_mean])
-
-        if self._robot_type == "w":
-            self.model.geom_friction[:, 0] = friction_coeff
-            # self.model.tendon_damping[12:15] = damping_coeff
-            self.model.tendon_damping[12] = damping_coeff[0]
-            self.model.tendon_damping[13] = damping_coeff[1]
-            self.model.tendon_damping[14] = damping_coeff[2]
-            # self.model.tendon_stiffness[12:15] = stiffness_coeff
-            self.model.tendon_stiffness[12] = stiffness_coeff[0]
-            self.model.tendon_stiffness[13] = stiffness_coeff[1]
-            self.model.tendon_stiffness[14] = stiffness_coeff[2]
-            # self.model.body_mass[0:3] = mass_coeff
-            self.model.body_mass[1] = mass_coeff[0]
-            self.model.body_mass[2] = mass_coeff[1]
-            self.model.body_mass[3] = mass_coeff[2]
-            self.model.body_inertia[1] = inertia_coeff[0]
-            self.model.body_inertia[2] = inertia_coeff[1]
-            self.model.body_inertia[3] = inertia_coeff[2]
-        elif self._robot_type == "j":
-            self.model.geom_friction[:, 0] = friction_coeff
-            # self.model.tendon_damping[6:9] = damping_coeff
-            self.model.tendon_damping[6] = damping_coeff[0]
-            self.model.tendon_damping[7] = damping_coeff[1]
-            self.model.tendon_damping[8] = damping_coeff[2]
-            # self.model.tendon_stiffness[6:9] = stiffness_coeff
-            self.model.tendon_stiffness[6] = stiffness_coeff[0]
-            self.model.tendon_stiffness[7] = stiffness_coeff[1]
-            self.model.tendon_stiffness[8] = stiffness_coeff[2]
-            # self.model.body_mass[0:3] = mass_coeff
-            self.model.body_mass[1] = mass_coeff[0]
-            self.model.body_mass[2] = mass_coeff[1]
-            self.model.body_mass[3] = mass_coeff[2]
-            self.model.body_inertia[1] = inertia_coeff[0]
-            self.model.body_inertia[2] = inertia_coeff[1]
-            self.model.body_inertia[3] = inertia_coeff[2]
-        return
-
 
     def reset_model(self):
         self._psi_wrap_around_count = 0
-
-        if self._use_intrinsic_params_dr:
-            self._reset_intrinsic_params()
 
         # '''
         # with rolling noise start
@@ -1012,28 +896,15 @@ class tr_env_gym(MujocoEnv, utils.EzPickle):
             self._waypt = np.array([self._oripoint[0] + waypt_length * np.cos(waypt_yaw), self._oripoint[1] + waypt_length * np.sin(waypt_yaw)])
             # if self._is_test == True: # for test3
             #     self._waypt = np.array([0, 0]) # for test3
-        
-        elif self._desired_action == "vel_track":
-            lin_vel_scale = 0.5
-            self._lin_vel_cmd = np.array([lin_vel_scale*np.cos(self._reset_psi), lin_vel_scale*np.sin(self._reset_psi)])
-            self._ang_vel_cmd = 0.0
-                
-        obs_act_seq = []
-        for i in range(64):
-            self.do_simulation(tendons, self.frame_skip)
-            _, observation, _ = self._get_obs()
-            action = self.data.ctrl[:].copy()
-            obs_act_seq.append(np.concatenate((observation, action)))
-        obs_act_seq = np.array(obs_act_seq)
 
         self._step_num = 0
         if self._desired_action == "turn":
             for i in range(self._reward_delay_steps):
                 self.step(tendons)
         
-        state, observation, gt_log_intriparam = self._get_obs()
+        observation = self._get_obs()
 
-        return state, observation, gt_log_intriparam, obs_act_seq
+        return observation
 
     def viewer_setup(self):
         assert self.viewer is not None
