@@ -133,7 +133,7 @@ class GNNPolicyNetwork(nn.Module):
         super(GNNPolicyNetwork, self).__init__()
         self.gnn1 = GNNEncoder(node_dim=node_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.gnn2 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
-        self.gnn3 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
+        #self.gnn3 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         #self.gnn4 = GNNEncoder(node_dim=hidden_dim, edge_dim=edge_dim, hidden_dim=hidden_dim)
         self.actor_head = ActorHead(hidden_dim=hidden_dim, edge_dim=edge_dim)
 
@@ -145,7 +145,7 @@ class GNNPolicyNetwork(nn.Module):
         # edge_attr: [batch, edge_num, edge_dim]
         h = self.gnn1(nodes, edge_index, edge_attr)  # [batch, node_num, hidden_dim]
         h = self.gnn2(h, edge_index, edge_attr)  # [batch, node_num, hidden_dim]
-        h = self.gnn3(h, edge_index, edge_attr)
+        #h = self.gnn3(h, edge_index, edge_attr)
         #h = self.gnn4(h, edge_index, edge_attr)
         action_logits = self.actor_head(h, edge_index, edge_attr, edge_type_mask)  # [batch, active_edge_num, 2]
         

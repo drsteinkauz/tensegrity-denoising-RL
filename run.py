@@ -186,7 +186,7 @@ def test(env, path_to_model, saved_data_dir, simulation_seconds, read_actor_only
         action_scaled = torch.tanh(action_scaled)
         # action_unscaled = action_scaled.detach() * 0.3 - 0.15
         # action_unscaled = action_scaled.detach() * 0.05
-        obs, _, done, _, info = env.step(action_scaled.detach().numpy())
+        obs, _, done, _, info = env.step(action_scaled.detach().cpu().numpy())
 
 
 
@@ -465,7 +465,6 @@ def traj_test(env, path_to_model_tr, path_to_model_ccw, path_to_model_cw, saved_
     np.save(os.path.join(saved_data_dir, "iniyaw_data.npy"),iniyaw_array)
     np.save(os.path.join(saved_data_dir, "waypt_data.npy"),way_points)
 
-
 def _obs_to_graph_input(observation, device, node_num, node_dim, edge_dim, edge_index, edge_type):
         # observation: [batch, obs_dim]
         if node_dim < 6:
@@ -579,7 +578,7 @@ if __name__ == "__main__":
 
     if(args.test):
         if os.path.isfile(args.test):
-            gymenv = tr_env_gym.tr_env_gym(render_mode='human',
+            gymenv = tr_env_gym.tr_env_gym(render_mode='None',
                                         xml_file=os.path.join(os.getcwd(),args.env_xml),
                                         robot_type=robot_type,
                                         is_test = True,
