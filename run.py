@@ -83,7 +83,7 @@ def train(env, log_dir, model_dir, lr, gpu_idx=None, tb_step_recorder="False"):
             if step_num % TIMESTEPS == 0:
                 torch.save(agent.actor.state_dict(), os.path.join(model_dir, f"actor_{step_num}.pth"))
 
-            if done or episode_len >= 5000:
+            if done or episode_len >= 1000:
                 break
 
         end_time = time.time()
